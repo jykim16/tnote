@@ -1,0 +1,30 @@
+[package]
+name = "tnote"
+version = "0.1.0"
+edition = "2021"
+description = "Per-tmux-window notepad"
+repository = "https://github.com/jkim/tnote"
+license = "MIT"
+
+[[bin]]
+name = "tnote"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+
+[workspace.metadata.dist]
+cargo-dist-version = "0.31.0"
+ci = ["github"]
+installers = ["shell"]
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+]
+pr-run-mode = "plan"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
