@@ -1,7 +1,9 @@
 mod config;
 mod install;
 mod notes;
+mod render;
 mod tmux;
+mod viewer;
 
 use clap::{Parser, Subcommand};
 use config::Config;
@@ -39,6 +41,8 @@ enum Cmd {
     Install,
     /// Remove toggle.sh and unbind Ctrl+N in tmux
     Uninstall,
+    /// Open a rendered, interactive view of the current note
+    View,
     /// Show usage
     Help,
 }
@@ -63,6 +67,7 @@ fn main() {
         None => cmd_open(&config, &notes),
         Some(Cmd::Name { name }) => cmd_name(&config, &notes, name),
         Some(Cmd::Show) => cmd_show(&notes),
+        Some(Cmd::View) => cmd_view(&config, &notes),
         Some(Cmd::Clear) => cmd_clear(&notes),
         Some(Cmd::List) => cmd_list(&notes),
         Some(Cmd::Path) => cmd_path(&notes),
@@ -109,16 +114,16 @@ fn cmd_open(config: &Config, notes: &Notes) {
     let popup_pane = tmux::read_popup_state(&state_file)
         .or_else(|| tmux::find_popup_pane_id());
 
-    if let Some(pane_id) = popup_pane {
-        tmux::save_and_close(&pane_id, &config.editor);
+    if popup_pane.is_some() {
+        // The popup is a viewer — kill it directly (no unsaved editor state).
+        tmux::kill_popup();
         let _ = std::fs::remove_file(&state_file);
         return;
     }
 
-    // Open a new popup anchored top-right
-    let file_str = file.to_string_lossy().into_owned();
+    // Open a new popup anchored top-right running the viewer.
     let state_str = state_file.to_string_lossy().into_owned();
-    tmux::open_popup(&file_str, &label, &config.width, &config.height, &config.editor, &state_str);
+    tmux::open_popup(&label, &config.width, &config.height, &state_str);
 }
 
 fn cmd_name(config: &Config, notes: &Notes, name: &str) {
@@ -159,6 +164,16 @@ fn cmd_show(notes: &Notes) {
     } else {
         println!("tnote: (empty) [{}]", label);
     }
+}
+
+fn cmd_view(config: &Config, notes: &Notes) {
+    let (_, file) = current_note(notes);
+
+    if !file.exists() {
+        let _ = fs::write(&file, "");
+    }
+
+    viewer::run(&file, &config.editor);
 }
 
 fn cmd_clear(notes: &Notes) {
@@ -206,9 +221,10 @@ fn print_help() {
         "tnote — per-tmux-window notepad
 
 USAGE:
-  tnote                  Open/toggle popup for the current window
+  tnote                  Open/toggle viewer popup for the current window
+  tnote view             Open the interactive viewer inline (e=edit, q=quit)
   tnote name <name>      Name this window's note (also renames the tmux window)
-  tnote show             Print note contents inline
+  tnote show             Print note contents inline (plain text)
   tnote clear            Clear this window's note
   tnote list             List all notes with line counts
   tnote path             Print the note file path

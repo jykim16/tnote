@@ -1,6 +1,4 @@
 use std::process::Command;
-use std::thread;
-use std::time::Duration;
 
 /// Check that tmux is installed and >= 3.2. Returns Err with a user-friendly message.
 pub fn check_version() -> Result<(), String> {
@@ -76,50 +74,6 @@ pub fn find_popup_pane_id() -> Option<String> {
     None
 }
 
-/// Send a single tmux key/sequence to the given pane.
-fn send_key(pane_id: &str, key: &str) {
-    let _ = Command::new("tmux")
-        .args(["send-keys", "-t", pane_id, key])
-        .output();
-    thread::sleep(Duration::from_millis(60));
-}
-
-/// Send save+quit keystrokes appropriate for the configured editor, then kill the popup.
-pub fn save_and_close(pane_id: &str, editor: &str) {
-    // Match on the basename of the editor path
-    let base = std::path::Path::new(editor)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(editor);
-
-    match base {
-        e if e.ends_with("nvim") || e.ends_with("vim") || e == "vi" => {
-            send_key(pane_id, "Escape");
-            send_key(pane_id, ":wq");
-            send_key(pane_id, "Enter");
-        }
-        e if e.ends_with("nano") => {
-            send_key(pane_id, "C-o");
-            send_key(pane_id, "Enter");
-            send_key(pane_id, "C-x");
-        }
-        e if e.ends_with("micro") => {
-            send_key(pane_id, "C-s");
-            send_key(pane_id, "C-q");
-        }
-        e if e.ends_with("hx") || e.ends_with("helix") => {
-            send_key(pane_id, "Escape");
-            send_key(pane_id, ":wq");
-            send_key(pane_id, "Enter");
-        }
-        _ => {
-            // Unknown editor — kill popup immediately
-        }
-    }
-
-    thread::sleep(Duration::from_millis(100));
-    kill_popup();
-}
 
 /// Kill the current tmux popup.
 pub fn kill_popup() {
@@ -155,28 +109,32 @@ pub fn read_popup_state(state_file: &std::path::Path) -> Option<String> {
     }
 }
 
-/// Open a tmux popup anchored top-right that sets its pane title and launches the editor.
+/// Open a tmux popup anchored top-right that runs the tnote viewer.
 /// Writes $TMUX_PANE to state_file on open and removes it on exit so toggle detection works.
-pub fn open_popup(file: &str, label: &str, width: &str, height: &str, editor: &str, state_file: &str) {
-    let quoted_file = shell_quote(file);
+pub fn open_popup(label: &str, width: &str, height: &str, state_file: &str) {
     let quoted_state = shell_quote(state_file);
 
+    // Resolve the path to the running tnote binary so the popup runs the same build.
+    let tnote_bin = std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "tnote".into());
+    let quoted_tnote = shell_quote(&tnote_bin);
+
     // The popup shell:
-    //   1. Records its own pane ID so tnote can target it for save+quit
+    //   1. Records its own pane ID so tnote can target it for toggle detection
     //   2. Sets the pane title via OSC 2 (belt-and-suspenders detection)
-    //   3. Opens the editor
+    //   3. Runs the viewer (interactive; exits on q/Esc)
     //   4. Cleans up the state file on exit
     let popup_cmd = format!(
         "printf '%s' \"$TMUX_PANE\" > {state}; \
          printf '\\033]2;tnote-popup\\033\\\\'; \
-         {editor} {file}; \
+         {tnote} view; \
          rm -f {state}",
         state = quoted_state,
-        editor = editor,
-        file = quoted_file,
+        tnote = quoted_tnote,
     );
 
-    let title = format!(" tnote: {} ", label);
+    let title = format!(" ≡ tnote  {} ", label);
 
     let _ = Command::new("tmux")
         .args([
