@@ -85,6 +85,11 @@ impl Notes {
                 false
             };
 
+        // Ensure the named note file exists so it appears in `tnote list`.
+        if !new_file.exists() {
+            fs::write(&new_file, "")?;
+        }
+
         fs::write(&link, name)?;
         Ok(migrated)
     }
@@ -254,6 +259,78 @@ impl Notes {
         Ok(notes)
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn setup() -> (TempDir, Notes) {
+        let tmp = TempDir::new().expect("tempdir");
+        let notes = Notes::new(tmp.path().to_path_buf());
+        notes.ensure_dir().expect("ensure_dir");
+        (tmp, notes)
+    }
+
+    /// Naming a window with no prior note must create the named-.md file.
+    #[test]
+    fn name_window_creates_named_file_when_no_prior_note() {
+        let (_tmp, notes) = setup();
+
+        notes.name_window("tmux-test+0", "myproject").expect("name_window");
+
+        let named_file = notes.dir.join("named-myproject.md");
+        assert!(named_file.exists(), "named-myproject.md should be created");
+    }
+
+    /// The named note must appear in list_notes() even when it is empty.
+    #[test]
+    fn list_notes_includes_named_note_after_naming() {
+        let (_tmp, notes) = setup();
+
+        notes.name_window("tmux-test+0", "myproject").expect("name_window");
+
+        let list = notes.list_notes().expect("list_notes");
+        let named: Vec<_> = list.iter().filter(|(cat, _, _, _, _)| cat == "named").collect();
+        assert_eq!(named.len(), 1, "should list exactly one named note");
+        assert_eq!(named[0].1, "myproject");
+    }
+
+    /// Naming a window that already has content migrates it.
+    #[test]
+    fn name_window_migrates_existing_content() {
+        let (_tmp, notes) = setup();
+
+        let old_file = notes.dir.join("tmux-test+0.md");
+        fs::write(&old_file, "existing content\n").expect("write");
+
+        let migrated = notes.name_window("tmux-test+0", "myproject").expect("name_window");
+
+        assert!(migrated, "should report migration");
+        let named_file = notes.dir.join("named-myproject.md");
+        assert!(named_file.exists());
+        assert_eq!(fs::read_to_string(&named_file).unwrap(), "existing content\n");
+        assert!(!old_file.exists(), "old file should be removed after migration");
+    }
+
+    /// Naming preserves an existing named file if it already has content.
+    #[test]
+    fn name_window_does_not_overwrite_existing_named_file() {
+        let (_tmp, notes) = setup();
+
+        let named_file = notes.dir.join("named-myproject.md");
+        fs::write(&named_file, "important notes\n").expect("write");
+
+        notes.name_window("tmux-test+0", "myproject").expect("name_window");
+
+        assert_eq!(
+            fs::read_to_string(&named_file).unwrap(),
+            "important notes\n",
+            "existing named file content must not be overwritten"
+        );
+    }
 }
 
 fn is_pid_alive(pid: u32) -> bool {
