@@ -62,6 +62,11 @@ impl Notes {
                 return name.trim().to_string();
             }
         }
+        if key.starts_with("tmux-") {
+            if let Some(label) = crate::tmux::window_display_label(key) {
+                return label;
+            }
+        }
         key.to_string()
     }
 
@@ -91,7 +96,7 @@ impl Notes {
     ///   `tmux-*.*`        — tmux window key; checked against live tmux windows.
     ///   `named-<name>.*`  — Never removed unless scope is Named or All.
     ///   unprefixed        — Never removed unless scope is Unprefixed or All.
-    pub fn cleanup_orphaned(&self, scope: Option<&ClearScope>) -> std::io::Result<Vec<String>> {
+    pub fn cleanup_orphaned(&self, scope: Option<&ClearScope>, dry_run: bool) -> std::io::Result<Vec<String>> {
         let meta = self.meta_dir();
 
         let include_named = matches!(scope, Some(ClearScope::Named) | Some(ClearScope::All));
@@ -128,9 +133,11 @@ impl Notes {
             };
 
             if dead {
-                let _ = fs::remove_file(self.dir.join(format!("{}.md",   stem)));
-                let _ = fs::remove_file(meta.join(format!("{}.link", stem)));
-                let _ = fs::remove_file(meta.join(format!("{}.pid",  stem)));
+                if !dry_run {
+                    let _ = fs::remove_file(self.dir.join(format!("{}.md",   stem)));
+                    let _ = fs::remove_file(meta.join(format!("{}.link", stem)));
+                    let _ = fs::remove_file(meta.join(format!("{}.pid",  stem)));
+                }
                 removed.push(stem);
             }
         }
@@ -181,8 +188,10 @@ impl Notes {
                 .unwrap_or("")
                 .to_string();
 
-            let (category, display) = if let Some(s) = stem.strip_prefix("tmux-") {
-                ("tmux".to_string(), s.to_string())
+            let (category, display) = if stem.starts_with("tmux-") {
+                let label = crate::tmux::window_display_label(&stem)
+                    .unwrap_or_else(|| stem.strip_prefix("tmux-").unwrap_or(&stem).to_string());
+                ("tmux".to_string(), label)
             } else if let Some(s) = stem.strip_prefix("named-") {
                 ("named".to_string(), s.to_string())
             } else if stem.starts_with("shell-") {
@@ -206,6 +215,7 @@ impl Notes {
         notes.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
         Ok(notes)
     }
+
 }
 
 fn is_pid_alive(pid: u32) -> bool {

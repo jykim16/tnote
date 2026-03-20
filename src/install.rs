@@ -49,8 +49,18 @@ pub fn run(config: &Config) {
         std::process::exit(1);
     }
 
-    // Write ~/.tnote/meta/tmux.conf
+    // Unbind the old key if it differs from the new one
     let tmux_conf_path = meta_dir.join("tmux.conf");
+    if let Ok(old) = fs::read_to_string(&tmux_conf_path) {
+        if let Some(old_key) = old.lines()
+            .find_map(|l| l.strip_prefix("bind-key ").and_then(|r| r.split_whitespace().next()))
+        {
+            if old_key != config.key {
+                let _ = Command::new("tmux").args(["unbind-key", old_key]).status();
+            }
+        }
+    }
+
     let key = &config.key;
     let tmux_conf = format!(
         "# tnote key bindings — managed by 'tnote setup' / 'tnote uninstall'\n\

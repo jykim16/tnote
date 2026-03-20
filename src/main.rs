@@ -42,6 +42,9 @@ enum Cmd {
         /// Also remove notes in the given category: unprefixed, named, tmux, all
         #[arg(long, value_name = "CATEGORY")]
         all: Option<ClearScope>,
+        /// Print what would be removed without removing anything
+        #[arg(long)]
+        dry_run: bool,
     },
     /// List all notes with line counts
     List,
@@ -72,7 +75,7 @@ fn main() {
         None => cmd_open(&config, &notes),
         Some(Cmd::Name { name }) => cmd_name(&notes, name),
         Some(Cmd::Show) => cmd_show(&notes),
-        Some(Cmd::Clean { all }) => cmd_clean(&notes, all.as_ref()),
+        Some(Cmd::Clean { all, dry_run }) => cmd_clean(&notes, all.as_ref(), *dry_run),
         Some(Cmd::List) => cmd_list(&notes),
         Some(Cmd::Path) => cmd_path(&notes),
         Some(Cmd::Setup) => cmd_setup(&config),
@@ -203,15 +206,16 @@ fn cmd_show(notes: &Notes) {
     }
 }
 
-fn cmd_clean(notes: &Notes, scope: Option<&ClearScope>) {
+fn cmd_clean(notes: &Notes, scope: Option<&ClearScope>, dry_run: bool) {
     let mut any = false;
 
-    match notes.cleanup_orphaned(scope) {
+    match notes.cleanup_orphaned(scope, dry_run) {
         Ok(removed) if !removed.is_empty() => {
+            let verb = if dry_run { "would remove" } else { "removed" };
             for key in &removed {
-                println!("tnote: removed note {}", key.if_supports_color(Stdout, |t| t.yellow()));
+                println!("tnote: {} note {}", verb, key.if_supports_color(Stdout, |t| t.yellow()));
             }
-            println!("tnote: removed {} orphaned note(s)", removed.len().if_supports_color(Stdout, |t| t.style(Style::new().yellow().bold())));
+            println!("tnote: {} {} orphaned note(s)", verb, removed.len().if_supports_color(Stdout, |t| t.style(Style::new().yellow().bold())));
             any = true;
         }
         Ok(_) => {}
@@ -221,9 +225,10 @@ fn cmd_clean(notes: &Notes, scope: Option<&ClearScope>) {
         }
     }
 
-    let sessions = tmux::cleanup_popup_sessions(&notes.dir);
+    let sessions = tmux::cleanup_popup_sessions(&notes.dir, dry_run);
     for s in &sessions {
-        println!("tnote: killed popup session {}", s.if_supports_color(Stdout, |t| t.yellow()));
+        let verb = if dry_run { "would kill" } else { "killed" };
+        println!("tnote: {} popup session {}", verb, s.if_supports_color(Stdout, |t| t.yellow()));
         any = true;
     }
 
