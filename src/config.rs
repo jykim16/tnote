@@ -2,9 +2,8 @@ use std::path::PathBuf;
 
 pub struct Config {
     pub dir: PathBuf,
-    pub editor: String,
-    pub width: String,
-    pub height: String,
+    pub width: u16,
+    pub height: u16,
 }
 
 impl Config {
@@ -12,26 +11,42 @@ impl Config {
         let dir = std::env::var("TNOTE_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
-                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                let home = PathBuf::from(home);
-                let new_dir = home.join(".tnotes");
-                let old_dir = home.join(".termnotes");
-                // Auto-migrate from old default dir if new one doesn't exist yet
-                if !new_dir.exists() && old_dir.exists() {
-                    if let Err(e) = std::fs::rename(&old_dir, &new_dir) {
-                        eprintln!("tnote: could not migrate {} → {}: {}", old_dir.display(), new_dir.display(), e);
-                    } else {
-                        eprintln!("tnote: migrated {} → {}", old_dir.display(), new_dir.display());
+                let home = PathBuf::from(
+                    std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
+                );
+                let target   = home.join(".tnote");
+                let from_old = home.join(".tnotes");
+                let from_old2 = home.join(".termnotes");
+
+                if !target.exists() {
+                    if from_old.exists() {
+                        if let Err(e) = std::fs::rename(&from_old, &target) {
+                            eprintln!("tnote: could not migrate {} → {}: {}", from_old.display(), target.display(), e);
+                        } else {
+                            eprintln!("tnote: migrated {} → {}", from_old.display(), target.display());
+                        }
+                    } else if from_old2.exists() {
+                        if let Err(e) = std::fs::rename(&from_old2, &target) {
+                            eprintln!("tnote: could not migrate {} → {}: {}", from_old2.display(), target.display(), e);
+                        } else {
+                            eprintln!("tnote: migrated {} → {}", from_old2.display(), target.display());
+                        }
                     }
                 }
-                new_dir
+                target
             });
 
         Config {
             dir,
-            editor: std::env::var("TNOTE_EDITOR").unwrap_or_else(|_| "vim".to_string()),
-            width: std::env::var("TNOTE_WIDTH").unwrap_or_else(|_| "62".to_string()),
-            height: std::env::var("TNOTE_HEIGHT").unwrap_or_else(|_| "22".to_string()),
+            width: parse_env("TNOTE_WIDTH", 62),
+            height: parse_env("TNOTE_HEIGHT", 22),
         }
     }
+}
+
+fn parse_env(key: &str, default: u16) -> u16 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }

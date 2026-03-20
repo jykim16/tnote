@@ -31,8 +31,12 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jkim/tnote/releases/lat
 ```sh
 git clone https://github.com/jkim/tnote
 cd tnote
-make install          # builds release binary → /usr/local/bin/tnote
+cargo install --path .
 ```
+
+- `cargo build --release` — compiles the binary into `target/release/tnote` but does not install it. Useful for testing before installing.
+- `cargo install --path .` — compiles and copies the binary to `~/.cargo/bin/tnote`, making it available on your `PATH`. Run this again after any code change to update the installed binary.
+- `make install` — runs `cargo build --release` then copies `target/release/tnote` to `~/bin/tnote`. Use this instead of `cargo install` if you prefer the binary in `~/bin/` rather than `~/.cargo/bin/`.
 
 **After installing the binary**, wire up the tmux keybinding:
 

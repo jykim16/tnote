@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cargo install:*)"
+      "Bash(cargo install:*)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:github.com)",
+      "Bash(cargo build:*)",
+      "Bash(make install:*)",
+      "Bash(git -C /Users/jkim/Documents/tnote remote set-url origin git@github.com:jykim16/tnote.git)",
+      "Bash(tnote show:*)",
+      "Bash(tnote install:*)",
+      "Bash(tmux:*)"
     ]
   }
 }

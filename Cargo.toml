@@ -11,6 +11,10 @@ name = "tnote"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+owo-colors = { version = "4", features = ["supports-colors"] }
+ratatui = "0.29"
+portable-pty = "0.8"
+vt100 = "0.15"
 
 [workspace.metadata.dist]
 cargo-dist-version = "0.31.0"

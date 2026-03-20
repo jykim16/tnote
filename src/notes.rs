@@ -1,5 +1,7 @@
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
+use crate::ClearScope;
 
 pub struct Notes {
     pub dir: PathBuf,
@@ -10,17 +12,43 @@ impl Notes {
         Self { dir }
     }
 
-    pub fn ensure_dir(&self) -> std::io::Result<()> {
-        fs::create_dir_all(&self.dir)
+    /// `~/.tnote/meta/` — stores .link, .pid, and tmux.conf (non-note files).
+    pub fn meta_dir(&self) -> PathBuf {
+        self.dir.join("meta")
     }
 
-    /// Resolve the note file for a window key, following `.link` files for named notes.
+    pub fn ensure_dir(&self) -> std::io::Result<()> {
+        fs::create_dir_all(&self.dir)?;
+        fs::create_dir_all(self.meta_dir())?;
+        self.migrate_to_meta()
+    }
+
+    /// Move any .link / .pid files that exist in the root into meta/ (one-time migration).
+    fn migrate_to_meta(&self) -> std::io::Result<()> {
+        let meta = self.meta_dir();
+        for entry in fs::read_dir(&self.dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            if name.ends_with(".link") || name.ends_with(".pid") {
+                let dest = meta.join(&name);
+                if !dest.exists() {
+                    let _ = fs::rename(&path, &dest);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolve the note file for a window key, following .link files for named notes.
     pub fn file_for_key(&self, key: &str) -> PathBuf {
-        let link = self.dir.join(format!("{}.link", key));
+        let link = self.meta_dir().join(format!("{}.link", key));
         if link.exists() {
             if let Ok(name) = fs::read_to_string(&link) {
-                let name = name.trim();
-                return self.dir.join(format!("named-{}.md", name));
+                return self.dir.join(format!("named-{}.md", name.trim()));
             }
         }
         self.dir.join(format!("{}.md", key))
@@ -28,7 +56,7 @@ impl Notes {
 
     /// Return the display label for a key (the assigned name, or the key itself).
     pub fn label_for_key(&self, key: &str) -> String {
-        let link = self.dir.join(format!("{}.link", key));
+        let link = self.meta_dir().join(format!("{}.link", key));
         if link.exists() {
             if let Ok(name) = fs::read_to_string(&link) {
                 return name.trim().to_string();
@@ -40,7 +68,7 @@ impl Notes {
     /// Assign a name to the current window's note. Migrates existing unnamed content.
     /// Returns true if content was migrated.
     pub fn name_window(&self, key: &str, name: &str) -> std::io::Result<bool> {
-        let link = self.dir.join(format!("{}.link", key));
+        let link = self.meta_dir().join(format!("{}.link", key));
         let old_file = self.dir.join(format!("{}.md", key));
         let new_file = self.dir.join(format!("named-{}.md", name));
 
@@ -56,8 +84,87 @@ impl Notes {
         Ok(migrated)
     }
 
-    /// List all `.md` files in the notes dir. Returns (display_name, line_count, path).
-    pub fn list_notes(&self) -> std::io::Result<Vec<(String, usize, PathBuf)>> {
+    /// Remove all notes whose associated process or tmux window is no longer alive.
+    ///
+    /// Rules:
+    ///   `shell-<pid>.*`   — PID is embedded in the key; checked with ps.
+    ///   `tmux-*.*`        — tmux window key; checked against live tmux windows.
+    ///   `named-<name>.*`  — Never removed unless scope is Named or All.
+    ///   unprefixed        — Never removed unless scope is Unprefixed or All.
+    pub fn cleanup_orphaned(&self, scope: Option<&ClearScope>) -> std::io::Result<Vec<String>> {
+        let meta = self.meta_dir();
+
+        let include_named = matches!(scope, Some(ClearScope::Named) | Some(ClearScope::All));
+
+        // Collect unique stems from .md files in root and .link files in meta/.
+        let mut stems: HashSet<String> = HashSet::new();
+        for dir in [&self.dir, &meta] {
+            for entry in fs::read_dir(dir)? {
+                let name = entry?.file_name();
+                let name = name.to_string_lossy();
+                let stem = if let Some(s) = name.strip_suffix(".md")   { s }
+                      else if let Some(s) = name.strip_suffix(".link") { s }
+                      else { continue };
+                if !stem.starts_with("named-") || include_named {
+                    stems.insert(stem.to_string());
+                }
+            }
+        }
+
+        let live_windows = crate::tmux::live_window_keys();
+
+        let mut removed = Vec::new();
+        for stem in stems {
+            let dead = if let Some(s) = stem.strip_prefix("shell-") {
+                matches!(scope, Some(ClearScope::All))
+                    || s.parse::<u32>().map_or(false, |pid| !is_pid_alive(pid))
+            } else if stem.starts_with("tmux-") {
+                matches!(scope, Some(ClearScope::Tmux) | Some(ClearScope::All))
+                    || !live_windows.contains(&stem)
+            } else if stem.starts_with("named-") {
+                true // only collected when include_named is set
+            } else {
+                matches!(scope, Some(ClearScope::Unprefixed) | Some(ClearScope::All))
+            };
+
+            if dead {
+                let _ = fs::remove_file(self.dir.join(format!("{}.md",   stem)));
+                let _ = fs::remove_file(meta.join(format!("{}.link", stem)));
+                let _ = fs::remove_file(meta.join(format!("{}.pid",  stem)));
+                removed.push(stem);
+            }
+        }
+
+        Ok(removed)
+    }
+
+    /// Builds a reverse map: note name → list of keys that link to it.
+    /// e.g. "api-server" → ["tmux-work+0", "shell-12345"]
+    fn link_sources(&self) -> HashMap<String, Vec<String>> {
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        let meta = self.meta_dir();
+        if let Ok(entries) = fs::read_dir(&meta) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if let Some(key) = name.strip_suffix(".link") {
+                    if let Ok(target) = fs::read_to_string(entry.path()) {
+                        map.entry(target.trim().to_string())
+                            .or_default()
+                            .push(key.to_string());
+                    }
+                }
+            }
+        }
+        map
+    }
+
+    /// List all `.md` files in the notes dir.
+    /// Returns (category, display_name, sources, line_count, path).
+    /// Category is one of: "tmux", "named", "shell", "other".
+    /// Sources is non-empty only for named notes — the keys that link to this note.
+    pub fn list_notes(&self) -> std::io::Result<Vec<(String, String, Vec<String>, usize, PathBuf)>> {
+        let sources = self.link_sources();
         let mut notes = Vec::new();
 
         for entry in fs::read_dir(&self.dir)? {
@@ -74,15 +181,39 @@ impl Notes {
                 .unwrap_or("")
                 .to_string();
 
-            // Strip "named-" prefix for display
-            let display = stem.trim_start_matches("named-").to_string();
+            let (category, display) = if let Some(s) = stem.strip_prefix("tmux-") {
+                ("tmux".to_string(), s.to_string())
+            } else if let Some(s) = stem.strip_prefix("named-") {
+                ("named".to_string(), s.to_string())
+            } else if stem.starts_with("shell-") {
+                ("shell".to_string(), stem.clone())
+            } else {
+                ("other".to_string(), stem.clone())
+            };
+
+            let note_sources = if category == "named" {
+                sources.get(&display).cloned().unwrap_or_default()
+            } else {
+                vec![]
+            };
+
             let content = fs::read_to_string(&path).unwrap_or_default();
             let lines = content.lines().count();
 
-            notes.push((display, lines, path));
+            notes.push((category, display, note_sources, lines, path));
         }
 
-        notes.sort_by(|a, b| a.0.cmp(&b.0));
+        notes.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
         Ok(notes)
     }
+}
+
+fn is_pid_alive(pid: u32) -> bool {
+    std::process::Command::new("ps")
+        .args(["-p", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(true)
 }
