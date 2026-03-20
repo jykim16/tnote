@@ -6,6 +6,7 @@ mod tmux;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use config::Config;
+use std::io::{self, Write};
 use notes::Notes;
 use owo_colors::{OwoColorize, Style, Stream::Stdout, Stream::Stderr};
 use std::fs;
@@ -36,8 +37,8 @@ enum Cmd {
     Name { name: String },
     /// Print note contents inline
     Show,
-    /// Remove all notes not associated with a running process
-    Clear {
+    /// Remove notes not tied to a running process or window
+    Clean {
         /// Also remove notes in the given category: unprefixed, named, tmux, all
         #[arg(long, value_name = "CATEGORY")]
         all: Option<ClearScope>,
@@ -46,8 +47,8 @@ enum Cmd {
     List,
     /// Print the note file path
     Path,
-    /// Bind <prefix> C-n to open tnote in a tmux popup
-    Install,
+    /// Configure editor, key binding, and dimensions, then install
+    Setup,
     /// Remove the tmux keybinding
     Uninstall,
     /// Show usage
@@ -71,16 +72,17 @@ fn main() {
         None => cmd_open(&config, &notes),
         Some(Cmd::Name { name }) => cmd_name(&notes, name),
         Some(Cmd::Show) => cmd_show(&notes),
-        Some(Cmd::Clear { all }) => cmd_clear(&notes, all.as_ref()),
+        Some(Cmd::Clean { all }) => cmd_clean(&notes, all.as_ref()),
         Some(Cmd::List) => cmd_list(&notes),
         Some(Cmd::Path) => cmd_path(&notes),
-        Some(Cmd::Install) => install::run(&config),
+        Some(Cmd::Setup) => cmd_setup(&config),
         Some(Cmd::Uninstall) => install::uninstall(&config),
         Some(Cmd::Help) => print_help(),
         Some(Cmd::Popup { window_key }) => {
             let key = window_key.as_deref()
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
+                .or_else(|| std::env::var("TNOTE_WINDOW_KEY").ok())
                 .or_else(|| tmux::window_key())
                 .unwrap_or_else(|| shell_session_key());
             cmd_popup_inline(&config, &notes, &key);
@@ -122,6 +124,11 @@ fn shell_session_key() -> String {
 // ── Subcommands ───────────────────────────────────────────────────────────────
 
 fn cmd_open(config: &Config, notes: &Notes) {
+    if tmux::is_in_tmux() && tmux::is_popup_session() {
+        let _ = std::process::Command::new("tmux").args(["detach-client"]).status();
+        return;
+    }
+
     let (key, file) = current_note(notes);
     let label = notes.label_for_key(&key);
 
@@ -130,7 +137,7 @@ fn cmd_open(config: &Config, notes: &Notes) {
     }
 
     let result = if tmux::is_in_tmux() {
-        tmux::open_popup(&file, &label, config.width, config.height)
+        tmux::open_popup_session(&file, &key, config)
     } else {
         editor::run(&file, &label, config.width, config.height)
     };
@@ -196,21 +203,32 @@ fn cmd_show(notes: &Notes) {
     }
 }
 
-fn cmd_clear(notes: &Notes, scope: Option<&ClearScope>) {
+fn cmd_clean(notes: &Notes, scope: Option<&ClearScope>) {
+    let mut any = false;
+
     match notes.cleanup_orphaned(scope) {
-        Ok(removed) if removed.is_empty() => {
-            println!("tnote: {}", "no orphaned notes found".if_supports_color(Stdout, |t| t.green()));
-        }
-        Ok(removed) => {
+        Ok(removed) if !removed.is_empty() => {
             for key in &removed {
-                println!("tnote: removed {}", key.if_supports_color(Stdout, |t| t.yellow()));
+                println!("tnote: removed note {}", key.if_supports_color(Stdout, |t| t.yellow()));
             }
             println!("tnote: removed {} orphaned note(s)", removed.len().if_supports_color(Stdout, |t| t.style(Style::new().yellow().bold())));
+            any = true;
         }
+        Ok(_) => {}
         Err(e) => {
             eprintln!("tnote: {}", e.if_supports_color(Stderr, |t| t.red()));
             std::process::exit(1);
         }
+    }
+
+    let sessions = tmux::cleanup_popup_sessions(&notes.dir);
+    for s in &sessions {
+        println!("tnote: killed popup session {}", s.if_supports_color(Stdout, |t| t.yellow()));
+        any = true;
+    }
+
+    if !any {
+        println!("tnote: {}", "nothing to clean up".if_supports_color(Stdout, |t| t.green()));
     }
 }
 
@@ -307,6 +325,98 @@ fn cmd_path(notes: &Notes) {
     println!("{}", file.display());
 }
 
+fn cmd_setup(config: &Config) {
+    println!("tnote setup\n");
+
+    let editor = prompt_editor(&config.editor);
+    let key    = prompt("Key (prefix+?)", &config.key);
+    let width  = prompt_u16("Popup width",  config.width);
+    let height = prompt_u16("Popup height", config.height);
+
+    let new_config = Config {
+        dir:    config.dir.clone(),
+        editor,
+        key,
+        width,
+        height,
+    };
+
+    if let Err(e) = new_config.save() {
+        eprintln!("tnote: failed to save config: {}", e);
+        std::process::exit(1);
+    }
+
+    install::run(&new_config);
+}
+
+fn prompt_editor(current: &str) -> String {
+    let candidates = ["nvim", "vim", "vi", "nano", "emacs", "hx", "micro", "kak", "helix"];
+    let available: Vec<&str> = candidates.iter()
+        .copied()
+        .filter(|e| which(e))
+        .collect();
+
+    if available.is_empty() {
+        return prompt("Editor", current);
+    }
+
+    println!("  Available editors:");
+    for (i, e) in available.iter().enumerate() {
+        let marker = if *e == current { " ◀" } else { "" };
+        println!("    {}. {}{}", i + 1, e, marker);
+    }
+    println!("  Enter a number or type a path.");
+
+    loop {
+        print!("  {:<18} [{}]: ", "Editor", current);
+        let _ = io::stdout().flush();
+        let mut input = String::new();
+        let _ = io::stdin().read_line(&mut input);
+        let trimmed = input.trim();
+
+        if trimmed.is_empty() {
+            return current.to_string();
+        }
+        if let Ok(n) = trimmed.parse::<usize>() {
+            if n >= 1 && n <= available.len() {
+                return available[n - 1].to_string();
+            }
+            eprintln!("  please enter a number between 1 and {}", available.len());
+            continue;
+        }
+        return trimmed.to_string();
+    }
+}
+
+fn which(cmd: &str) -> bool {
+    std::process::Command::new("which")
+        .arg(cmd)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn prompt(label: &str, default: &str) -> String {
+    print!("  {:<18} [{}]: ", label, default);
+    let _ = io::stdout().flush();
+    let mut input = String::new();
+    let _ = io::stdin().read_line(&mut input);
+    let trimmed = input.trim();
+    if trimmed.is_empty() { default.to_string() } else { trimmed.to_string() }
+}
+
+fn prompt_u16(label: &str, default: u16) -> u16 {
+    loop {
+        let s = prompt(label, &default.to_string());
+        match s.parse() {
+            Ok(v) => return v,
+            Err(_) => eprintln!("  please enter a number"),
+        }
+    }
+}
+
 fn print_help() {
     println!(
         "tnote — per-tmux-window notepad
@@ -315,28 +425,27 @@ USAGE:
   tnote                  Open editor for the current window
   tnote name <name>      Name this window's note (also renames the tmux window)
   tnote show             Print note contents inline
-  tnote clear            Remove notes not tied to a running process
+  tnote clean            Remove orphaned notes and popup sessions
   tnote list             List all notes with line counts
   tnote path             Print the note file path
-  tnote install          Bind <prefix> C-n to open tnote in a tmux popup
+  tnote setup            Configure and install tmux key binding
   tnote uninstall        Remove the tmux keybinding
   tnote help             Show this help
 
-KEYS (inside editor):
-  Esc or Ctrl+S          Save and close
-  Ctrl+Q                 Close without saving
+NOTE TYPES:
+  tmux    One note per tmux window, keyed to <session>+<window> (e.g. work+0).
+          Persists until the window is closed. Cleared by 'tnote clean'.
+
+  named   Created with 'tnote name <name>'. Shared across any window that
+          points to the same name. Never auto-cleared.
+
+  shell   One note per shell session (parent PID), used outside tmux.
+          Cleared by 'tnote clean' once the shell process exits.
 
 ENVIRONMENT:
   TNOTE_DIR              Note storage directory  (default: ~/.tnote)
+  TNOTE_KEY              Tmux key binding        (default: t, used as prefix+t)
   TNOTE_WIDTH            Popup width in columns  (default: 62)
-  TNOTE_HEIGHT           Popup height in lines   (default: 22)
-
-Each tmux window gets its own note, keyed to <session>-<window> (e.g. work-0).
-Named notes are shared across windows that point to the same name.
-
-Files:
-  ~/.tnote/<session>-<index>.md   Unnamed window notes
-  ~/.tnote/named-<name>.md        Named notes
-  ~/.tnote/<session>-<index>.link Pointer from window key to name"
+  TNOTE_HEIGHT           Popup height in lines   (default: 22)"
     );
 }

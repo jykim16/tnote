@@ -2,13 +2,26 @@ use std::io;
 use std::path::Path;
 use std::process::Command;
 
-fn shell_escape(s: &str) -> String {
+pub fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// True when running inside a tmux session.
 pub fn is_in_tmux() -> bool {
     std::env::var("TMUX").is_ok()
+}
+
+/// True when running inside a tnote popup session.
+pub fn is_popup_session() -> bool {
+    let Ok(output) = Command::new("tmux")
+        .args(["display-message", "-p", "#{session_name}"])
+        .output()
+    else {
+        return false;
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .starts_with("tnote-popup-")
 }
 
 /// Returns the current tmux window's note key, e.g. "tmux-work+0".
@@ -35,22 +48,46 @@ pub fn live_window_keys() -> std::collections::HashSet<String> {
         .collect()
 }
 
-/// Open the note file in a tmux display-popup anchored to the top-right of
-/// the tmux window, which spans the full physical terminal regardless of pane layout.
-pub fn open_popup(file: &Path, label: &str, width: u16, height: u16) -> io::Result<()> {
-    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
-    let shell_cmd = format!("{} {}", editor, shell_escape(&file.to_string_lossy()));
+
+/// Open (or reattach to) a persistent popup session for the given note file.
+pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config) -> io::Result<()> {
+    let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("note");
+    let stem_safe = stem.replace(['+', '/'], "_");
+    let popup_session = format!("tnote-popup-{}", stem_safe);
+
+    let (note_type, note_label) = if let Some(s) = stem.strip_prefix("named-") {
+        ("named", s)
+    } else if let Some(s) = stem.strip_prefix("tmux-") {
+        ("tmux", s)
+    } else if let Some(s) = stem.strip_prefix("shell-") {
+        ("shell", s)
+    } else {
+        ("", stem)
+    };
+
+    let popup_title = if note_type.is_empty() {
+        format!(" tnote - {} ", note_label)
+    } else {
+        format!(" {} tnote - {} ", note_type, note_label)
+    };
+
+    let attach_cmd = format!(
+        "tmux attach-session -t {sess} 2>/dev/null || \
+         tmux new-session -s {sess} -e TNOTE_WINDOW_KEY={key} -e EDITOR={editor} tnote popup",
+        sess   = shell_escape(&popup_session),
+        key    = shell_escape(key),
+        editor = shell_escape(&config.editor),
+    );
+
     let status = Command::new("tmux")
         .args([
             "display-popup",
-            "-x", "R",
-            "-y", "T",
-            "-w", &width.to_string(),
-            "-h", &height.to_string(),
+            "-x", "R", "-y", "T",
+            "-w", &config.width.to_string(),
+            "-h", &config.height.to_string(),
             "-b", "rounded",
-            "-T", &format!(" tnote: {} ", label),
-            "-E",
-            &shell_cmd,
+            "-T", &popup_title,
+            "-E", &attach_cmd,
         ])
         .status()?;
 
@@ -58,6 +95,50 @@ pub fn open_popup(file: &Path, label: &str, width: u16, height: u16) -> io::Resu
         return Err(io::Error::new(io::ErrorKind::Other, "tmux display-popup failed"));
     }
     Ok(())
+}
+
+/// Kill any tnote popup sessions whose note file no longer exists.
+/// Returns the list of session names that were removed.
+pub fn cleanup_popup_sessions(note_dir: &std::path::Path) -> Vec<String> {
+    // Build the set of session names that have a matching note file.
+    let valid: std::collections::HashSet<String> =
+        std::fs::read_dir(note_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let path = e.path();
+                if path.extension()?.to_str()? != "md" { return None; }
+                let stem = path.file_stem()?.to_str()?;
+                Some(format!("tnote-popup-{}", stem.replace(['+', '/'], "_")))
+            })
+            .collect();
+
+    let Ok(output) = Command::new("tmux")
+        .args(["list-sessions", "-F", "#{session_name}:#{session_attached}"])
+        .output()
+    else {
+        return vec![];
+    };
+
+    let to_kill: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let (name, attached) = line.split_once(':')?;
+            let attached: u32 = attached.trim().parse().ok()?;
+            if name.starts_with("tnote-popup-") && attached == 0 && !valid.contains(name) {
+                Some(name.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    for session in &to_kill {
+        let _ = Command::new("tmux").args(["kill-session", "-t", session]).status();
+    }
+
+    to_kill
 }
 
 /// Rename the current tmux window.

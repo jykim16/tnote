@@ -1,6 +1,41 @@
 use crate::config::Config;
 use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+fn user_tmux_conf() -> Option<PathBuf> {
+    std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".tmux.conf"))
+}
+
+fn add_source_line(user_conf: &Path, source_path: &Path) -> std::io::Result<()> {
+    let line = format!("source-file {}", source_path.display());
+    let content = fs::read_to_string(user_conf).unwrap_or_default();
+    if content.lines().any(|l| l.trim() == line) {
+        return Ok(());
+    }
+    let mut f = fs::OpenOptions::new().create(true).append(true).open(user_conf)?;
+    if !content.is_empty() && !content.ends_with('\n') {
+        writeln!(f)?;
+    }
+    writeln!(f, "{}", line)?;
+    Ok(())
+}
+
+fn remove_source_line(user_conf: &Path, source_path: &Path) -> std::io::Result<()> {
+    let Ok(content) = fs::read_to_string(user_conf) else { return Ok(()); };
+    let line = format!("source-file {}", source_path.display());
+    let filtered: Vec<&str> = content.lines().filter(|l| l.trim() != line).collect();
+    let new_content = if content.ends_with('\n') {
+        format!("{}\n", filtered.join("\n"))
+    } else {
+        filtered.join("\n")
+    };
+    if new_content != content {
+        fs::write(user_conf, new_content)?;
+    }
+    Ok(())
+}
 
 pub fn run(config: &Config) {
     if let Err(e) = fs::create_dir_all(&config.dir) {
@@ -8,18 +43,20 @@ pub fn run(config: &Config) {
         std::process::exit(1);
     }
 
-    // Write ~/.tnote/meta/tmux.conf
     let meta_dir = config.dir.join("meta");
     if let Err(e) = fs::create_dir_all(&meta_dir) {
         eprintln!("tnote: failed to create {}: {}", meta_dir.display(), e);
         std::process::exit(1);
     }
+
+    // Write ~/.tnote/meta/tmux.conf
     let tmux_conf_path = meta_dir.join("tmux.conf");
+    let key = &config.key;
     let tmux_conf = format!(
-        "# tnote key bindings — managed by 'tnote install' / 'tnote uninstall'\n\
-         unbind-key -n C-n\n\
-         unbind-key C-n\n\
-         bind-key -n C-n display-popup -x R -y T -w 64 -h 24 -b rounded -E 'tnote popup'\n"
+        "# tnote key bindings — managed by 'tnote setup' / 'tnote uninstall'\n\
+         unbind-key {key}\n\
+         bind-key {key} run-shell 'tnote'\n",
+        key = key,
     );
 
     if let Err(e) = fs::write(&tmux_conf_path, &tmux_conf) {
@@ -47,22 +84,26 @@ pub fn run(config: &Config) {
         }
     }
 
-    // Bind C-n in the popup key table (tmux 3.4+) so pressing C-n inside
-    // the popup closes it. Ignore failures on older tmux without this table.
-    let _ = Command::new("tmux")
-        .args(["bind-key", "-T", "popup", "C-n", "display-popup", "-C"])
-        .status();
+    // Persist across tmux restarts by adding source-file line to ~/.tmux.conf
+    if let Some(user_conf) = user_tmux_conf() {
+        match add_source_line(&user_conf, &tmux_conf_path) {
+            Ok(_) => println!("tnote: added source-file line to {}", user_conf.display()),
+            Err(e) => eprintln!("tnote: could not update {}: {}", user_conf.display(), e),
+        }
+    }
 
-    println!("tnote: install complete. Binding: C-n opens/closes tnote popup");
-    println!("tnote: to persist across tmux restarts, add this one line to ~/.tmux.conf:");
-    println!("         source-file {}", tmux_conf_path.display());
+    println!("tnote: setup complete. Binding: prefix+{} opens/closes tnote popup", key);
 }
 
 pub fn uninstall(config: &Config) {
     let tmux_conf_path = config.dir.join("meta").join("tmux.conf");
-    let cleared = "# tnote key bindings — cleared by 'tnote uninstall'\nunbind-key -n C-n\n";
+    let key = &config.key;
+    let cleared = format!(
+        "# tnote key bindings — cleared by 'tnote uninstall'\nunbind-key {}\n",
+        key
+    );
 
-    match fs::write(&tmux_conf_path, cleared) {
+    match fs::write(&tmux_conf_path, &cleared) {
         Ok(_) => {
             let _ = Command::new("tmux")
                 .args(["source-file", &tmux_conf_path.to_string_lossy()])
@@ -70,10 +111,17 @@ pub fn uninstall(config: &Config) {
             println!("tnote: cleared bindings from live tmux session");
         }
         Err(_) => {
-            let _ = Command::new("tmux").args(["unbind-key", "C-n"]).status();
+            let _ = Command::new("tmux").args(["unbind-key", key]).status();
+        }
+    }
+
+    // Remove source-file line from ~/.tmux.conf
+    if let Some(user_conf) = user_tmux_conf() {
+        match remove_source_line(&user_conf, &tmux_conf_path) {
+            Ok(_) => println!("tnote: removed source-file line from {}", user_conf.display()),
+            Err(e) => eprintln!("tnote: could not update {}: {}", user_conf.display(), e),
         }
     }
 
     println!("tnote: uninstall complete.");
-    println!("tnote: if you added source-file to ~/.tmux.conf, you can remove that line now.");
 }
