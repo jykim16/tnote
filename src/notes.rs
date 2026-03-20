@@ -342,3 +342,348 @@ fn is_pid_alive(pid: u32) -> bool {
         .map(|s| s.success())
         .unwrap_or(true)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn setup(tmp: &tempfile::TempDir) -> Notes {
+        let notes = Notes::new(tmp.path().to_path_buf());
+        notes.ensure_dir().unwrap();
+        notes
+    }
+
+    // ── ensure_dir ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn ensure_dir_creates_note_and_meta_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = Notes::new(tmp.path().join("notes"));
+        notes.ensure_dir().unwrap();
+        assert!(tmp.path().join("notes").is_dir());
+        assert!(tmp.path().join("notes/meta").is_dir());
+    }
+
+    // ── migrate_to_meta ───────────────────────────────────────────────────────
+
+    #[test]
+    fn migrate_to_meta_moves_link_and_pid_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = Notes::new(tmp.path().to_path_buf());
+        fs::create_dir_all(notes.meta_dir()).unwrap();
+
+        // Place .link and .pid files in root (old layout)
+        fs::write(tmp.path().join("tmux-$1+@2.link"), "myname").unwrap();
+        fs::write(tmp.path().join("tmux-$1+@2.pid"), "1234").unwrap();
+        // .md files should NOT be migrated
+        fs::write(tmp.path().join("tmux-$1+@2.md"), "content").unwrap();
+
+        notes.ensure_dir().unwrap();
+
+        assert!(notes.meta_dir().join("tmux-$1+@2.link").exists());
+        assert!(notes.meta_dir().join("tmux-$1+@2.pid").exists());
+        assert!(!tmp.path().join("tmux-$1+@2.link").exists());
+        assert!(!tmp.path().join("tmux-$1+@2.pid").exists());
+        // .md stays in root
+        assert!(tmp.path().join("tmux-$1+@2.md").exists());
+    }
+
+    // ── file_for_key ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn file_for_key_no_link_returns_key_md() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        let path = notes.file_for_key("tmux-$1+@3");
+        assert_eq!(path, tmp.path().join("tmux-$1+@3.md"));
+    }
+
+    #[test]
+    fn file_for_key_follows_link_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(notes.meta_dir().join("tmux-$1+@3.link"), "myproject").unwrap();
+        let path = notes.file_for_key("tmux-$1+@3");
+        assert_eq!(path, tmp.path().join("named-myproject.md"));
+    }
+
+    #[test]
+    fn file_for_key_link_trims_whitespace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(notes.meta_dir().join("tmux-$1+@3.link"), "  myproject\n").unwrap();
+        let path = notes.file_for_key("tmux-$1+@3");
+        assert_eq!(path, tmp.path().join("named-myproject.md"));
+    }
+
+    // ── label_for_key ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn label_for_key_no_link_returns_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        assert_eq!(notes.label_for_key("shell-1234"), "shell-1234");
+    }
+
+    #[test]
+    fn label_for_key_with_link_returns_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(notes.meta_dir().join("tmux-$1+@3.link"), "api-server").unwrap();
+        assert_eq!(notes.label_for_key("tmux-$1+@3"), "api-server");
+    }
+
+    // ── name_window ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn name_window_creates_link_no_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        let migrated = notes.name_window("tmux-$1+@3", "work").unwrap();
+        assert!(!migrated);
+        let link = fs::read_to_string(notes.meta_dir().join("tmux-$1+@3.link")).unwrap();
+        assert_eq!(link, "work");
+    }
+
+    #[test]
+    fn name_window_migrates_non_empty_unnamed_note() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(tmp.path().join("tmux-$1+@3.md"), "some notes").unwrap();
+        let migrated = notes.name_window("tmux-$1+@3", "work").unwrap();
+        assert!(migrated);
+        assert!(!tmp.path().join("tmux-$1+@3.md").exists());
+        assert!(tmp.path().join("named-work.md").exists());
+        let content = fs::read_to_string(tmp.path().join("named-work.md")).unwrap();
+        assert_eq!(content, "some notes");
+    }
+
+    #[test]
+    fn name_window_skips_migration_if_named_file_already_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(tmp.path().join("tmux-$1+@3.md"), "old content").unwrap();
+        fs::write(tmp.path().join("named-work.md"), "existing").unwrap();
+        let migrated = notes.name_window("tmux-$1+@3", "work").unwrap();
+        assert!(!migrated);
+        // Both files remain unchanged
+        assert!(tmp.path().join("tmux-$1+@3.md").exists());
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("named-work.md")).unwrap(),
+            "existing"
+        );
+    }
+
+    #[test]
+    fn name_window_skips_migration_for_empty_unnamed_note() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(tmp.path().join("tmux-$1+@3.md"), "").unwrap();
+        let migrated = notes.name_window("tmux-$1+@3", "work").unwrap();
+        assert!(!migrated);
+    }
+
+    // ── remove_named ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn remove_named_returns_false_when_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        assert!(!notes.remove_named("ghost", false).unwrap());
+    }
+
+    #[test]
+    fn remove_named_deletes_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(tmp.path().join("named-work.md"), "content").unwrap();
+        assert!(notes.remove_named("work", false).unwrap());
+        assert!(!tmp.path().join("named-work.md").exists());
+    }
+
+    #[test]
+    fn remove_named_dry_run_leaves_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(tmp.path().join("named-work.md"), "content").unwrap();
+        assert!(notes.remove_named("work", true).unwrap());
+        assert!(tmp.path().join("named-work.md").exists());
+    }
+
+    #[test]
+    fn remove_named_also_removes_pointing_links() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(tmp.path().join("named-work.md"), "content").unwrap();
+        fs::write(notes.meta_dir().join("tmux-$1+@3.link"), "work").unwrap();
+        fs::write(notes.meta_dir().join("tmux-$1+@5.link"), "other").unwrap();
+        notes.remove_named("work", false).unwrap();
+        assert!(!notes.meta_dir().join("tmux-$1+@3.link").exists());
+        // Unrelated link untouched
+        assert!(notes.meta_dir().join("tmux-$1+@5.link").exists());
+    }
+
+    // ── cleanup_orphaned ──────────────────────────────────────────────────────
+
+    /// Returns a PID that is guaranteed to not be running.
+    fn dead_pid() -> u32 {
+        // Try a few high PIDs; pick the first one ps says is gone.
+        for pid in [9_999_997u32, 9_999_998, 9_999_999] {
+            if !is_pid_alive(pid) {
+                return pid;
+            }
+        }
+        panic!("could not find a dead PID for test");
+    }
+
+    #[test]
+    fn cleanup_orphaned_removes_dead_shell_note() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        let pid = dead_pid();
+        let key = format!("shell-{}", pid);
+        fs::write(tmp.path().join(format!("{}.md", key)), "stale").unwrap();
+        let removed = notes.cleanup_orphaned(None, false).unwrap();
+        assert!(removed.contains(&key));
+        assert!(!tmp.path().join(format!("{}.md", key)).exists());
+    }
+
+    #[test]
+    fn cleanup_orphaned_keeps_alive_shell_note() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        let pid = std::process::id(); // current process is definitely alive
+        let key = format!("shell-{}", pid);
+        fs::write(tmp.path().join(format!("{}.md", key)), "active").unwrap();
+        let removed = notes.cleanup_orphaned(None, false).unwrap();
+        assert!(!removed.contains(&key));
+        assert!(tmp.path().join(format!("{}.md", key)).exists());
+    }
+
+    #[test]
+    fn cleanup_orphaned_dry_run_leaves_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        let pid = dead_pid();
+        let key = format!("shell-{}", pid);
+        fs::write(tmp.path().join(format!("{}.md", key)), "stale").unwrap();
+        let removed = notes.cleanup_orphaned(None, true).unwrap();
+        assert!(removed.contains(&key));
+        // File must still exist after dry run
+        assert!(tmp.path().join(format!("{}.md", key)).exists());
+    }
+
+    #[test]
+    fn cleanup_orphaned_named_not_removed_without_scope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(tmp.path().join("named-work.md"), "important").unwrap();
+        let removed = notes.cleanup_orphaned(None, false).unwrap();
+        assert!(!removed.iter().any(|k| k.starts_with("named-")));
+        assert!(tmp.path().join("named-work.md").exists());
+    }
+
+    #[test]
+    fn cleanup_orphaned_named_removed_with_named_scope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(tmp.path().join("named-work.md"), "content").unwrap();
+        let removed = notes.cleanup_orphaned(Some(&ClearScope::Named), false).unwrap();
+        assert!(removed.contains(&"named-work".to_string()));
+        assert!(!tmp.path().join("named-work.md").exists());
+    }
+
+    #[test]
+    fn cleanup_orphaned_tmux_dead_window_removed() {
+        // Without a live tmux server, all tmux keys look dead
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        let key = "tmux-$99+@99";
+        fs::write(tmp.path().join(format!("{}.md", key)), "old").unwrap();
+        let removed = notes.cleanup_orphaned(None, false).unwrap();
+        assert!(removed.contains(&key.to_string()));
+    }
+
+    #[test]
+    fn cleanup_orphaned_tmux_superseded_removes_raw_md() {
+        // A tmux key that has a .link should have its raw .md cleaned up
+        // even if the window is still live (because the named file is canonical)
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        let key = "tmux-$1+@3";
+        fs::write(tmp.path().join(format!("{}.md", key)), "old raw").unwrap();
+        fs::write(notes.meta_dir().join(format!("{}.link", key)), "work").unwrap();
+        let removed = notes.cleanup_orphaned(None, false).unwrap();
+        // The stem is removed (superseded or dead either way)
+        assert!(removed.contains(&key.to_string()));
+    }
+
+    #[test]
+    fn cleanup_orphaned_all_scope_removes_everything() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(tmp.path().join("named-work.md"), "x").unwrap();
+        fs::write(tmp.path().join("tmux-$1+@1.md"), "y").unwrap();
+        fs::write(tmp.path().join("custom.md"), "z").unwrap();
+        let removed = notes.cleanup_orphaned(Some(&ClearScope::All), false).unwrap();
+        assert!(removed.contains(&"named-work".to_string()));
+        assert!(removed.contains(&"tmux-$1+@1".to_string()));
+        assert!(removed.contains(&"custom".to_string()));
+    }
+
+    // ── list_notes ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn list_notes_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        let list = notes.list_notes().unwrap();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn list_notes_categorizes_correctly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(tmp.path().join("named-work.md"), "a\nb").unwrap();
+        fs::write(tmp.path().join("tmux-$1+@3.md"), "c").unwrap();
+        fs::write(tmp.path().join("shell-1234.md"), "d\ne\nf").unwrap();
+        fs::write(tmp.path().join("custom.md"), "g").unwrap();
+
+        let list = notes.list_notes().unwrap();
+        // sorted by (category, display)
+        let cats: Vec<&str> = list.iter().map(|(c, _, _, _, _)| c.as_str()).collect();
+        assert!(cats.contains(&"named"));
+        assert!(cats.contains(&"tmux"));
+        assert!(cats.contains(&"shell"));
+        assert!(cats.contains(&"other"));
+
+        let work = list.iter().find(|(c, d, _, _, _)| c == "named" && d == "work").unwrap();
+        assert_eq!(work.3, 2); // line count
+
+        let shell = list.iter().find(|(c, _, _, _, _)| c == "shell").unwrap();
+        assert_eq!(shell.3, 3);
+    }
+
+    #[test]
+    fn list_notes_ignores_non_md_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(tmp.path().join("notes.txt"), "ignored").unwrap();
+        fs::write(tmp.path().join("readme.md"), "counted").unwrap();
+        let list = notes.list_notes().unwrap();
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn list_notes_named_includes_sources() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(tmp.path().join("named-work.md"), "content").unwrap();
+        fs::write(notes.meta_dir().join("tmux-$1+@3.link"), "work").unwrap();
+        let list = notes.list_notes().unwrap();
+        let work = list.iter().find(|(c, d, _, _, _)| c == "named" && d == "work").unwrap();
+        assert_eq!(work.2, vec!["tmux-$1+@3"]);
+    }
+}

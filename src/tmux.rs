@@ -77,6 +77,30 @@ pub fn window_display_label(key: &str) -> Option<String> {
 }
 
 
+/// Parse a tmux version string like "3.2a" or "2.9" into (major, minor).
+fn parse_version_str(s: &str) -> Option<(u32, u32)> {
+    let mut parts = s.trim().splitn(2, '.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor_str = parts.next().unwrap_or("0");
+    // Strip any trailing non-numeric chars (e.g. "2a" -> 2)
+    let minor: u32 = minor_str
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .unwrap_or(0);
+    Some((major, minor))
+}
+
+/// Returns the tmux server version as a (major, minor) tuple, or None if it can't be determined.
+fn tmux_server_version() -> Option<(u32, u32)> {
+    let output = Command::new("tmux")
+        .args(["display-message", "-p", "#{version}"])
+        .output()
+        .ok()?;
+    parse_version_str(&String::from_utf8_lossy(&output.stdout))
+}
+
 /// Open (or reattach to) a persistent popup session for the given note file.
 pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config) -> io::Result<()> {
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("note");
@@ -109,7 +133,7 @@ pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config
         editor = shell_escape(&config.editor),
     );
 
-    let status = Command::new("tmux")
+    let output = Command::new("tmux")
         .args([
             "display-popup",
             "-x", "R", "-y", "T",
@@ -119,10 +143,36 @@ pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config
             "-T", &popup_title,
             "-E", &attach_cmd,
         ])
-        .status()?;
+        .output()?;
 
-    if !status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, "tmux display-popup failed"));
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("protocol version mismatch") {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "tmux popup: protocol version mismatch between tmux client and server \
+                 (tmux was likely upgraded while a server was running) — \
+                 kill the old server with `pkill tmux`, then start a fresh session",
+            ));
+        }
+        match tmux_server_version() {
+            Some((major, minor)) if major < 3 || (major == 3 && minor < 2) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!(
+                        "tmux popup: display-popup requires tmux 3.2+ (server is {}.{}); \
+                         please upgrade tmux",
+                        major, minor
+                    ),
+                ));
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "tmux popup: display-popup failed",
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -178,4 +228,94 @@ pub fn rename_window(name: &str) {
     let _ = Command::new("tmux")
         .args(["rename-window", name])
         .output();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── shell_escape ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn shell_escape_simple_string() {
+        assert_eq!(shell_escape("hello"), "'hello'");
+    }
+
+    #[test]
+    fn shell_escape_empty_string() {
+        assert_eq!(shell_escape(""), "''");
+    }
+
+    #[test]
+    fn shell_escape_single_quote() {
+        // it's → 'it'\''s'
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn shell_escape_multiple_quotes() {
+        assert_eq!(shell_escape("a'b'c"), "'a'\\''b'\\''c'");
+    }
+
+    #[test]
+    fn shell_escape_only_quote() {
+        assert_eq!(shell_escape("'"), "''\\'''");
+    }
+
+    #[test]
+    fn shell_escape_special_chars_unchanged() {
+        // Spaces, $, @, etc. are safe inside single quotes
+        assert_eq!(shell_escape("foo bar $HOME"), "'foo bar $HOME'");
+    }
+
+    // ── parse_version_str ─────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_version_simple() {
+        assert_eq!(parse_version_str("3.2"), Some((3, 2)));
+    }
+
+    #[test]
+    fn parse_version_with_suffix() {
+        // tmux sometimes releases versions like "3.2a"
+        assert_eq!(parse_version_str("3.2a"), Some((3, 2)));
+    }
+
+    #[test]
+    fn parse_version_major_only_treated_as_minor_zero() {
+        assert_eq!(parse_version_str("3"), Some((3, 0)));
+    }
+
+    #[test]
+    fn parse_version_old_version() {
+        assert_eq!(parse_version_str("2.9"), Some((2, 9)));
+    }
+
+    #[test]
+    fn parse_version_trims_whitespace() {
+        assert_eq!(parse_version_str("  3.3\n"), Some((3, 3)));
+    }
+
+    #[test]
+    fn parse_version_empty_string_returns_none() {
+        assert_eq!(parse_version_str(""), None);
+    }
+
+    #[test]
+    fn parse_version_non_numeric_returns_none() {
+        assert_eq!(parse_version_str("invalid"), None);
+    }
+
+    #[test]
+    fn parse_version_satisfies_popup_requirement() {
+        // display-popup requires >= 3.2
+        let requires = |(maj, min): (u32, u32)| maj > 3 || (maj == 3 && min >= 2);
+        assert!(requires(parse_version_str("3.2").unwrap()));
+        assert!(requires(parse_version_str("3.2a").unwrap()));
+        assert!(requires(parse_version_str("3.3").unwrap()));
+        assert!(requires(parse_version_str("4.0").unwrap()));
+        assert!(!requires(parse_version_str("3.1").unwrap()));
+        assert!(!requires(parse_version_str("2.9").unwrap()));
+        assert!(!requires(parse_version_str("3.0").unwrap()));
+    }
 }

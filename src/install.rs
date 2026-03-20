@@ -135,3 +135,104 @@ pub fn uninstall(config: &Config) {
 
     println!("tnote uninstall: complete.");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── add_source_line ───────────────────────────────────────────────────────
+
+    #[test]
+    fn add_source_line_creates_file_if_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conf = tmp.path().join(".tmux.conf");
+        let src  = tmp.path().join("meta/tmux.conf");
+        add_source_line(&conf, &src).unwrap();
+        let content = fs::read_to_string(&conf).unwrap();
+        assert!(content.contains(&format!("source-file {}", src.display())));
+    }
+
+    #[test]
+    fn add_source_line_appends_to_existing_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conf = tmp.path().join(".tmux.conf");
+        let src  = tmp.path().join("meta/tmux.conf");
+        fs::write(&conf, "set -g mouse on\n").unwrap();
+        add_source_line(&conf, &src).unwrap();
+        let content = fs::read_to_string(&conf).unwrap();
+        assert!(content.starts_with("set -g mouse on\n"));
+        assert!(content.contains(&format!("source-file {}", src.display())));
+    }
+
+    #[test]
+    fn add_source_line_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conf = tmp.path().join(".tmux.conf");
+        let src  = tmp.path().join("meta/tmux.conf");
+        add_source_line(&conf, &src).unwrap();
+        add_source_line(&conf, &src).unwrap();
+        let content = fs::read_to_string(&conf).unwrap();
+        let count = content.lines()
+            .filter(|l| l.trim() == format!("source-file {}", src.display()))
+            .count();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn add_source_line_adds_newline_before_if_file_lacks_trailing_newline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conf = tmp.path().join(".tmux.conf");
+        let src  = tmp.path().join("meta/tmux.conf");
+        fs::write(&conf, "set -g mouse on").unwrap(); // no trailing newline
+        add_source_line(&conf, &src).unwrap();
+        let content = fs::read_to_string(&conf).unwrap();
+        // The source line should be on its own line
+        assert!(content.contains(&format!("\nsource-file {}", src.display())));
+    }
+
+    // ── remove_source_line ────────────────────────────────────────────────────
+
+    #[test]
+    fn remove_source_line_removes_the_line() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conf = tmp.path().join(".tmux.conf");
+        let src  = tmp.path().join("meta/tmux.conf");
+        fs::write(&conf, format!("set -g mouse on\nsource-file {}\n", src.display())).unwrap();
+        remove_source_line(&conf, &src).unwrap();
+        let content = fs::read_to_string(&conf).unwrap();
+        assert!(!content.contains(&format!("source-file {}", src.display())));
+        assert!(content.contains("set -g mouse on"));
+    }
+
+    #[test]
+    fn remove_source_line_noop_when_line_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conf = tmp.path().join(".tmux.conf");
+        let src  = tmp.path().join("meta/tmux.conf");
+        fs::write(&conf, "set -g mouse on\n").unwrap();
+        remove_source_line(&conf, &src).unwrap();
+        let content = fs::read_to_string(&conf).unwrap();
+        assert_eq!(content, "set -g mouse on\n");
+    }
+
+    #[test]
+    fn remove_source_line_ok_when_file_does_not_exist() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conf = tmp.path().join(".tmux.conf");
+        let src  = tmp.path().join("meta/tmux.conf");
+        // conf does not exist — should not error
+        remove_source_line(&conf, &src).unwrap();
+    }
+
+    #[test]
+    fn remove_source_line_preserves_trailing_newline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conf = tmp.path().join(".tmux.conf");
+        let src  = tmp.path().join("meta/tmux.conf");
+        fs::write(&conf, format!("a\nsource-file {}\nb\n", src.display())).unwrap();
+        remove_source_line(&conf, &src).unwrap();
+        let content = fs::read_to_string(&conf).unwrap();
+        assert!(content.ends_with('\n'));
+        assert_eq!(content, "a\nb\n");
+    }
+}
