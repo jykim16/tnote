@@ -77,6 +77,27 @@ pub fn window_display_label(key: &str) -> Option<String> {
 }
 
 
+/// Returns the tmux server version as a (major, minor) tuple, or None if it can't be determined.
+fn tmux_server_version() -> Option<(u32, u32)> {
+    let output = Command::new("tmux")
+        .args(["display-message", "-p", "#{version}"])
+        .output()
+        .ok()?;
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let version_str = raw.trim();
+    let mut parts = version_str.splitn(2, '.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor_str = parts.next().unwrap_or("0");
+    // Strip any trailing non-numeric chars (e.g. "2a" -> 2)
+    let minor: u32 = minor_str
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .unwrap_or(0);
+    Some((major, minor))
+}
+
 /// Open (or reattach to) a persistent popup session for the given note file.
 pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config) -> io::Result<()> {
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("note");
@@ -109,7 +130,7 @@ pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config
         editor = shell_escape(&config.editor),
     );
 
-    let status = Command::new("tmux")
+    let output = Command::new("tmux")
         .args([
             "display-popup",
             "-x", "R", "-y", "T",
@@ -119,10 +140,36 @@ pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config
             "-T", &popup_title,
             "-E", &attach_cmd,
         ])
-        .status()?;
+        .output()?;
 
-    if !status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, "tmux display-popup failed"));
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("protocol version mismatch") {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "tmux popup: protocol version mismatch between tmux client and server — \
+                 restart your tmux server: kill the existing server with \
+                 `tmux kill-server`, then start a fresh session",
+            ));
+        }
+        match tmux_server_version() {
+            Some((major, minor)) if major < 3 || (major == 3 && minor < 2) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!(
+                        "tmux popup: display-popup requires tmux 3.2+ (server is {}.{}); \
+                         please upgrade tmux",
+                        major, minor
+                    ),
+                ));
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "tmux popup: display-popup failed",
+                ));
+            }
+        }
     }
     Ok(())
 }
