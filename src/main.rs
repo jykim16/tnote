@@ -42,9 +42,12 @@ enum Cmd {
         /// Also remove notes in the given category: unprefixed, named, tmux, all
         #[arg(long, value_name = "CATEGORY")]
         all: Option<ClearScope>,
+        /// Remove a specific named note by name
+        #[arg(long, value_name = "NAME")]
+        named: Option<String>,
         /// Print what would be removed without removing anything
         #[arg(long)]
-        dry_run: bool,
+        dryrun: bool,
     },
     /// List all notes with line counts
     List,
@@ -75,7 +78,7 @@ fn main() {
         None => cmd_open(&config, &notes),
         Some(Cmd::Name { name }) => cmd_name(&notes, name),
         Some(Cmd::Show) => cmd_show(&notes),
-        Some(Cmd::Clean { all, dry_run }) => cmd_clean(&notes, all.as_ref(), *dry_run),
+        Some(Cmd::Clean { all, named, dryrun }) => cmd_clean(&notes, all.as_ref(), named.as_deref(), *dryrun),
         Some(Cmd::List) => cmd_list(&notes),
         Some(Cmd::Path) => cmd_path(&notes),
         Some(Cmd::Setup) => cmd_setup(&config),
@@ -175,52 +178,86 @@ fn cmd_name(notes: &Notes, name: &str) {
     match notes.name_window(&key, name) {
         Ok(migrated) => {
             if migrated {
-                println!("tnote: migrated existing notes → {}", name);
+                println!("tnote name: migrated existing notes → {}", name);
             }
             if tmux::is_in_tmux() {
                 tmux::rename_window(name);
             }
-            println!("tnote: window note named '{}'", name);
+            println!("tnote name: window note named '{}'", name);
         }
         Err(e) => {
-            eprintln!("tnote: error naming note: {}", e);
+            eprintln!("tnote name: error naming note: {}", e);
             std::process::exit(1);
         }
     }
 }
 
 fn cmd_show(notes: &Notes) {
-    let (key, file) = current_note(notes);
-    let label = notes.label_for_key(&key);
-    let non_empty = file.exists() && file.metadata().map(|m| m.len() > 0).unwrap_or(false);
-
-    if non_empty {
-        println!("{}", format!("── tnote: {} ──", label).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
-        match fs::read_to_string(&file) {
-            Ok(content) => print!("{}", content),
-            Err(e) => eprintln!("tnote: {}", e.if_supports_color(Stderr, |t| t.red())),
+    // Resolve: named (via .link) → tmux → shell, show first non-empty.
+    let mut candidates: Vec<String> = Vec::new();
+    if tmux::is_in_tmux() {
+        if let Some(k) = tmux::window_key() {
+            candidates.push(k);
         }
-        println!("{}", "──────────────────────".if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
-    } else {
-        println!("tnote: (empty) [{}]", label.if_supports_color(Stdout, |t| t.dimmed()));
     }
+    candidates.push(shell_session_key());
+
+    // Expand any key that has a .link into the named key first.
+    let resolved: Vec<(String, String, PathBuf)> = candidates.into_iter().map(|k| {
+        let label = notes.label_for_key(&k);
+        let file  = notes.file_for_key(&k);
+        (k, label, file)
+    }).collect();
+
+    for (_, label, file) in &resolved {
+        let non_empty = file.exists() && file.metadata().map(|m| m.len() > 0).unwrap_or(false);
+        if non_empty {
+            println!("{}", format!("── tnote: {} ──", label).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
+            match fs::read_to_string(file) {
+                Ok(content) => print!("{}", content),
+                Err(e) => eprintln!("tnote show: {}", e.if_supports_color(Stderr, |t| t.red())),
+            }
+            println!("{}", "──────────────────────".if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
+            return;
+        }
+    }
+
+    let label = resolved.first().map(|(_, l, _)| l.as_str()).unwrap_or("unknown");
+    println!("tnote show: (empty) [{}]", label.if_supports_color(Stdout, |t| t.dimmed()));
 }
 
-fn cmd_clean(notes: &Notes, scope: Option<&ClearScope>, dry_run: bool) {
+fn cmd_clean(notes: &Notes, scope: Option<&ClearScope>, named: Option<&str>, dry_run: bool) {
     let mut any = false;
+
+    if let Some(name) = named {
+        match notes.remove_named(name, dry_run) {
+            Ok(true) => {
+                let verb = if dry_run { "would remove" } else { "removed" };
+                println!("tnote clean: {} named note '{}'", verb, name.if_supports_color(Stdout, |t| t.yellow()));
+                any = true;
+            }
+            Ok(false) => {
+                eprintln!("tnote clean: named note '{}' not found", name);
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("tnote clean: {}", e.if_supports_color(Stderr, |t| t.red()));
+                std::process::exit(1);
+            }
+        }
+    }
 
     match notes.cleanup_orphaned(scope, dry_run) {
         Ok(removed) if !removed.is_empty() => {
             let verb = if dry_run { "would remove" } else { "removed" };
             for key in &removed {
-                println!("tnote: {} note {}", verb, key.if_supports_color(Stdout, |t| t.yellow()));
+                println!("tnote clean: {} note {}", verb, key.if_supports_color(Stdout, |t| t.yellow()));
             }
-            println!("tnote: {} {} orphaned note(s)", verb, removed.len().if_supports_color(Stdout, |t| t.style(Style::new().yellow().bold())));
             any = true;
         }
         Ok(_) => {}
         Err(e) => {
-            eprintln!("tnote: {}", e.if_supports_color(Stderr, |t| t.red()));
+            eprintln!("tnote clean: {}", e.if_supports_color(Stderr, |t| t.red()));
             std::process::exit(1);
         }
     }
@@ -228,12 +265,12 @@ fn cmd_clean(notes: &Notes, scope: Option<&ClearScope>, dry_run: bool) {
     let sessions = tmux::cleanup_popup_sessions(&notes.dir, dry_run);
     for s in &sessions {
         let verb = if dry_run { "would kill" } else { "killed" };
-        println!("tnote: {} popup session {}", verb, s.if_supports_color(Stdout, |t| t.yellow()));
+        println!("tnote clean: {} popup session {}", verb, s.if_supports_color(Stdout, |t| t.yellow()));
         any = true;
     }
 
     if !any {
-        println!("tnote: {}", "nothing to clean up".if_supports_color(Stdout, |t| t.green()));
+        println!("tnote clean: {}", "nothing to clean up".if_supports_color(Stdout, |t| t.green()));
     }
 }
 
@@ -242,7 +279,7 @@ fn cmd_list(notes: &Notes) {
     match notes.list_notes() {
         Ok(list) => {
             if list.is_empty() {
-                println!("tnote: (no notes yet)");
+                println!("tnote list: (no notes yet)");
                 return;
             }
 
@@ -263,8 +300,10 @@ fn cmd_list(notes: &Notes) {
                     display.clone()
                 };
                 let sources: Vec<String> = note_sources.iter().map(|k| {
-                    if let Some(s) = k.strip_prefix("tmux-") {
-                        format!("tmux - {}", s)
+                    if k.starts_with("tmux-") {
+                        let label = tmux::window_display_label(k)
+                            .unwrap_or_else(|| k.strip_prefix("tmux-").unwrap_or(k).to_string());
+                        format!("tmux - {}", label)
                     } else {
                         format!("shell - {}", k.strip_prefix("shell-").unwrap_or(k))
                     }
@@ -319,7 +358,7 @@ fn cmd_list(notes: &Notes) {
             }
         }
         Err(e) => {
-            eprintln!("tnote: {}", e);
+            eprintln!("tnote list: {}", e);
             std::process::exit(1);
         }
     }
@@ -347,7 +386,7 @@ fn cmd_setup(config: &Config) {
     };
 
     if let Err(e) = new_config.save() {
-        eprintln!("tnote: failed to save config: {}", e);
+        eprintln!("tnote setup: failed to save config: {}", e);
         std::process::exit(1);
     }
 
@@ -431,6 +470,7 @@ USAGE:
   tnote name <name>      Name this window's note (also renames the tmux window)
   tnote show             Print note contents inline
   tnote clean            Remove orphaned notes and popup sessions
+  tnote clean --dryrun   Show what would be removed without removing anything
   tnote list             List all notes with line counts
   tnote path             Print the note file path
   tnote setup            Configure and install tmux key binding

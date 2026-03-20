@@ -164,8 +164,10 @@ pub fn cleanup_popup_sessions(note_dir: &std::path::Path, dry_run: bool) -> Vec<
         })
         .collect();
 
-    for session in &to_kill {
-        let _ = Command::new("tmux").args(["kill-session", "-t", session]).status();
+    if !dry_run {
+        for session in &to_kill {
+            let _ = Command::new("tmux").args(["kill-session", "-t", session]).status();
+        }
     }
 
     to_kill

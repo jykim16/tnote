@@ -39,13 +39,13 @@ fn remove_source_line(user_conf: &Path, source_path: &Path) -> std::io::Result<(
 
 pub fn run(config: &Config) {
     if let Err(e) = fs::create_dir_all(&config.dir) {
-        eprintln!("tnote: failed to create {}: {}", config.dir.display(), e);
+        eprintln!("tnote setup: failed to create {}: {}", config.dir.display(), e);
         std::process::exit(1);
     }
 
     let meta_dir = config.dir.join("meta");
     if let Err(e) = fs::create_dir_all(&meta_dir) {
-        eprintln!("tnote: failed to create {}: {}", meta_dir.display(), e);
+        eprintln!("tnote setup: failed to create {}: {}", meta_dir.display(), e);
         std::process::exit(1);
     }
 
@@ -70,10 +70,10 @@ pub fn run(config: &Config) {
     );
 
     if let Err(e) = fs::write(&tmux_conf_path, &tmux_conf) {
-        eprintln!("tnote: failed to write {}: {}", tmux_conf_path.display(), e);
+        eprintln!("tnote setup: failed to write {}: {}", tmux_conf_path.display(), e);
         std::process::exit(1);
     }
-    println!("tnote: wrote {}", tmux_conf_path.display());
+    println!("tnote setup: wrote {}", tmux_conf_path.display());
 
     // Source it into the live tmux session
     let status = Command::new("tmux")
@@ -82,14 +82,14 @@ pub fn run(config: &Config) {
 
     match status {
         Ok(s) if s.success() => {
-            println!("tnote: sourced bindings into live tmux session");
+            println!("tnote setup: sourced bindings into live tmux session");
         }
         Ok(_) => {
-            eprintln!("tnote: tmux source-file failed (is tmux running?)");
+            eprintln!("tnote setup: tmux source-file failed (is tmux running?)");
             std::process::exit(1);
         }
         Err(e) => {
-            eprintln!("tnote: could not run tmux: {}", e);
+            eprintln!("tnote setup: could not run tmux: {}", e);
             std::process::exit(1);
         }
     }
@@ -97,12 +97,12 @@ pub fn run(config: &Config) {
     // Persist across tmux restarts by adding source-file line to ~/.tmux.conf
     if let Some(user_conf) = user_tmux_conf() {
         match add_source_line(&user_conf, &tmux_conf_path) {
-            Ok(_) => println!("tnote: added source-file line to {}", user_conf.display()),
-            Err(e) => eprintln!("tnote: could not update {}: {}", user_conf.display(), e),
+            Ok(_) => println!("tnote setup: added source-file line to {}", user_conf.display()),
+            Err(e) => eprintln!("tnote setup: could not update {}: {}", user_conf.display(), e),
         }
     }
 
-    println!("tnote: setup complete. Binding: prefix+{} opens/closes tnote popup", key);
+    println!("tnote setup: setup complete. Binding: prefix+{} opens/closes tnote popup", key);
 }
 
 pub fn uninstall(config: &Config) {
@@ -118,7 +118,7 @@ pub fn uninstall(config: &Config) {
             let _ = Command::new("tmux")
                 .args(["source-file", &tmux_conf_path.to_string_lossy()])
                 .status();
-            println!("tnote: cleared bindings from live tmux session");
+            println!("tnote uninstall: cleared bindings from live tmux session");
         }
         Err(_) => {
             let _ = Command::new("tmux").args(["unbind-key", key]).status();
@@ -128,10 +128,10 @@ pub fn uninstall(config: &Config) {
     // Remove source-file line from ~/.tmux.conf
     if let Some(user_conf) = user_tmux_conf() {
         match remove_source_line(&user_conf, &tmux_conf_path) {
-            Ok(_) => println!("tnote: removed source-file line from {}", user_conf.display()),
-            Err(e) => eprintln!("tnote: could not update {}: {}", user_conf.display(), e),
+            Ok(_) => println!("tnote uninstall: removed source-file line from {}", user_conf.display()),
+            Err(e) => eprintln!("tnote uninstall: could not update {}: {}", user_conf.display(), e),
         }
     }
 
-    println!("tnote: uninstall complete.");
+    println!("tnote uninstall: complete.");
 }

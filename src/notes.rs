@@ -124,7 +124,11 @@ impl Notes {
                 matches!(scope, Some(ClearScope::All))
                     || s.parse::<u32>().map_or(false, |pid| !is_pid_alive(pid))
             } else if stem.starts_with("tmux-") {
-                matches!(scope, Some(ClearScope::Tmux) | Some(ClearScope::All))
+                // Superseded: a .link exists for this key, so the raw .md is redundant
+                let has_link = meta.join(format!("{}.link", &stem)).exists();
+                let md_exists = self.dir.join(format!("{}.md", &stem)).exists();
+                (has_link && md_exists)
+                    || matches!(scope, Some(ClearScope::Tmux) | Some(ClearScope::All))
                     || !live_windows.contains(&stem)
             } else if stem.starts_with("named-") {
                 true // only collected when include_named is set
@@ -134,15 +138,47 @@ impl Notes {
 
             if dead {
                 if !dry_run {
-                    let _ = fs::remove_file(self.dir.join(format!("{}.md",   stem)));
-                    let _ = fs::remove_file(meta.join(format!("{}.link", stem)));
-                    let _ = fs::remove_file(meta.join(format!("{}.pid",  stem)));
+                    let _ = fs::remove_file(self.dir.join(format!("{}.md", &stem)));
+                    // Only remove the .link if the window is truly gone (not just superseded)
+                    let superseded_only = stem.starts_with("tmux-")
+                        && meta.join(format!("{}.link", &stem)).exists()
+                        && live_windows.contains(&stem);
+                    if !superseded_only {
+                        let _ = fs::remove_file(meta.join(format!("{}.link", &stem)));
+                        let _ = fs::remove_file(meta.join(format!("{}.pid",  &stem)));
+                    }
                 }
                 removed.push(stem);
             }
         }
 
         Ok(removed)
+    }
+
+    /// Remove a named note and any .link files pointing to it.
+    /// Returns Ok(true) if the note existed, Ok(false) if not found.
+    pub fn remove_named(&self, name: &str, dry_run: bool) -> std::io::Result<bool> {
+        let note_file = self.dir.join(format!("named-{}.md", name));
+        if !note_file.exists() {
+            return Ok(false);
+        }
+        if !dry_run {
+            fs::remove_file(&note_file)?;
+            // Remove any .link files pointing to this name
+            let meta = self.meta_dir();
+            if let Ok(entries) = fs::read_dir(&meta) {
+                for entry in entries.flatten() {
+                    if entry.path().extension().and_then(|s| s.to_str()) == Some("link") {
+                        if let Ok(target) = fs::read_to_string(entry.path()) {
+                            if target.trim() == name {
+                                let _ = fs::remove_file(entry.path());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(true)
     }
 
     /// Builds a reverse map: note name → list of keys that link to it.
@@ -171,7 +207,8 @@ impl Notes {
     /// Category is one of: "tmux", "named", "shell", "other".
     /// Sources is non-empty only for named notes — the keys that link to this note.
     pub fn list_notes(&self) -> std::io::Result<Vec<(String, String, Vec<String>, usize, PathBuf)>> {
-        let sources = self.link_sources();
+        let sources   = self.link_sources();
+        let label_map = crate::tmux::window_label_map();
         let mut notes = Vec::new();
 
         for entry in fs::read_dir(&self.dir)? {
@@ -189,7 +226,8 @@ impl Notes {
                 .to_string();
 
             let (category, display) = if stem.starts_with("tmux-") {
-                let label = crate::tmux::window_display_label(&stem)
+                let label = label_map.get(stem.as_str())
+                    .cloned()
                     .unwrap_or_else(|| stem.strip_prefix("tmux-").unwrap_or(&stem).to_string());
                 ("tmux".to_string(), label)
             } else if let Some(s) = stem.strip_prefix("named-") {
