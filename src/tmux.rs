@@ -147,9 +147,9 @@ pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config
         if stderr.contains("protocol version mismatch") {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                "tmux popup: protocol version mismatch between tmux client and server — \
-                 restart your tmux server: kill the existing server with \
-                 `tmux kill-server`, then start a fresh session",
+                "tmux popup: protocol version mismatch between tmux client and server \
+                 (tmux was likely upgraded while a server was running) — \
+                 kill the old server with `pkill tmux`, then start a fresh session",
             ));
         }
         match tmux_server_version() {
