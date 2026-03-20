@@ -22,7 +22,7 @@ Per-tmux-window notepad. Each window gets its own persistent markdown note, open
 ## Install
 
 ```sh
-git clone https://github.com/jkim/tnote
+git clone https://github.com/jykim16/tnote
 cd tnote
 cargo install --path .
 tnote setup
