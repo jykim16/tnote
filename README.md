@@ -21,10 +21,23 @@ Per-tmux-window notepad. Each window gets its own persistent markdown note, open
 
 ## Install
 
+### From a release (recommended)
+
 ```sh
-git clone https://github.com/jykim16/tnote
-cd tnote
-cargo install --path .
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jykim16/tnote/releases/latest/download/tnote-installer.sh | sh
+```
+
+### From source
+
+```sh
+cargo install --git https://github.com/jykim16/tnote
+```
+
+---
+
+After installing, run:
+
+```sh
 tnote setup
 ```
 
