@@ -65,7 +65,8 @@ pub fn run(config: &Config) {
     let tmux_conf = format!(
         "# tnote key bindings — managed by 'tnote setup' / 'tnote uninstall'\n\
          unbind-key {key}\n\
-         bind-key {key} run-shell 'tnote'\n",
+         bind-key {key} run-shell 'tnote'\n\
+         set -s command-alias[100] 'tnote=run-shell tnote %*'\n",
         key = key,
     );
 
@@ -109,7 +110,7 @@ pub fn uninstall(config: &Config) {
     let tmux_conf_path = config.dir.join("meta").join("tmux.conf");
     let key = &config.key;
     let cleared = format!(
-        "# tnote key bindings — cleared by 'tnote uninstall'\nunbind-key {}\n",
+        "# tnote key bindings — cleared by 'tnote uninstall'\nunbind-key {}\nset -su command-alias[100]\n",
         key
     );
 

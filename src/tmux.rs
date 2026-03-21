@@ -230,6 +230,20 @@ pub fn rename_window(name: &str) {
         .output();
 }
 
+/// Show a message in the tmux status bar.
+pub fn display_message(msg: &str) {
+    let _ = Command::new("tmux")
+        .args(["display-message", msg])
+        .status();
+}
+
+/// Show tmux's command-prompt asking for a note name, then run `tnote name <input>`.
+pub fn prompt_name() {
+    let _ = Command::new("tmux")
+        .args(["command-prompt", "-p", "Note name:", "run-shell 'tnote name %%'"])
+        .status();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

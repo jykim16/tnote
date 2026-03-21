@@ -34,7 +34,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Name this window's note (also renames the tmux window)
-    Name { name: String },
+    Name { name: Option<String> },
     /// Print note contents inline
     Show,
     /// Remove notes not tied to a running process or window
@@ -76,7 +76,7 @@ fn main() {
 
     match &cli.command {
         None => cmd_open(&config, &notes),
-        Some(Cmd::Name { name }) => cmd_name(&notes, name),
+        Some(Cmd::Name { name }) => cmd_name(&notes, name.as_deref()),
         Some(Cmd::Show) => cmd_show(&notes),
         Some(Cmd::Clean { all, named, dryrun }) => cmd_clean(&notes, all.as_ref(), named.as_deref(), *dryrun),
         Some(Cmd::List) => cmd_list(&notes),
@@ -172,7 +172,17 @@ fn cmd_popup_inline(_config: &Config, notes: &Notes, key: &str) {
     }
 }
 
-fn cmd_name(notes: &Notes, name: &str) {
+fn cmd_name(notes: &Notes, name: Option<&str>) {
+    let Some(name) = name else {
+        if tmux::is_in_tmux() {
+            tmux::prompt_name();
+        } else {
+            eprintln!("tnote name: provide a name, e.g.: tnote name <name>");
+            std::process::exit(1);
+        }
+        return;
+    };
+
     let (key, _) = current_note(notes);
 
     match notes.name_window(&key, name) {
@@ -182,6 +192,7 @@ fn cmd_name(notes: &Notes, name: &str) {
             }
             if tmux::is_in_tmux() {
                 tmux::rename_window(name);
+                tmux::display_message(&format!("tnote: note named '{}'", name));
             }
             println!("tnote name: window note named '{}'", name);
         }
@@ -468,6 +479,7 @@ fn print_help() {
 USAGE:
   tnote                  Open editor for the current window
   tnote name <name>      Name this window's note (also renames the tmux window)
+  tnote name             Interactive name prompt (tmux only)
   tnote show             Print note contents inline
   tnote clean            Remove orphaned notes and popup sessions
   tnote clean --dryrun   Show what would be removed without removing anything
@@ -476,6 +488,15 @@ USAGE:
   tnote setup            Configure and install tmux key binding
   tnote uninstall        Remove the tmux keybinding
   tnote help             Show this help
+
+TMUX COMMAND LINE (works while a process is running):
+  Press ':' in any tmux window, then type:
+    tnote              Open note popup
+    tnote name <name>  Name current window's note
+    tnote name         Interactive name prompt
+    tnote show         Print note contents
+    tnote list         List all notes
+  Requires 'tnote setup' to install the ':tnote' command alias.
 
 NOTE TYPES:
   tmux    One note per tmux window, keyed to <session>+<window> (e.g. work+0).
