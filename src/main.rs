@@ -25,7 +25,7 @@ pub enum ClearScope {
 }
 
 #[derive(Parser)]
-#[command(name = "tnote", about = "Per-tmux-window notepad", disable_help_subcommand = true)]
+#[command(name = "tnote", about = "Per-tmux-window notepad", disable_help_subcommand = true, version)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,

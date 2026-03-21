@@ -1,6 +1,14 @@
 # tnote
 
-Per-tmux-window notepad. Each window gets its own persistent markdown note, opened in a floating popup anchored to the top-right corner. Press the same key to close it.
+tmux enhancing notepad. Each window gets its own persistent markdown note, opened in a floating popup anchored to the top-right corner. Press the same key to close it.
+
+## Why tnote?
+
+Running more than a dozen Claude Code sessions in parallel made it easy to get a lot done, but constant context switching became a real problem. Returning to a session meant trying to remember what the next job was before getting back into flow.
+
+tnote was built to solve that. It's lightweight and stays out of the way: a quick popup to check what you were doing, drop in a task list, jot down commands to run later, or record what you've already finished. A note pinned to your tmux window means your context lives exactly where you left it.
+
+Since tnotes are just markdown files, my agents use tnote too. I tell it to log its progress in tnote or complete all the tasks I've listed in my tnote. It's as simple as that!
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -21,10 +29,23 @@ Per-tmux-window notepad. Each window gets its own persistent markdown note, open
 
 ## Install
 
+### From a release (recommended)
+
 ```sh
-git clone https://github.com/jykim16/tnote
-cd tnote
-cargo install --path .
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jykim16/tnote/releases/latest/download/tnote-installer.sh | sh
+```
+
+### From source
+
+```sh
+cargo install --git https://github.com/jykim16/tnote
+```
+
+---
+
+After installing, run:
+
+```sh
 tnote setup
 ```
 
