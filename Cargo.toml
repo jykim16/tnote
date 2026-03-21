@@ -9,6 +9,10 @@ license = "MIT"
 [[bin]]
 name = "tnote"
 
+[lib]
+name = "tnote"
+path = "src/lib.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 owo-colors = { version = "4", features = ["supports-colors"] }

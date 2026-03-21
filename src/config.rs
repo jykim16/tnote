@@ -62,7 +62,7 @@ impl Config {
     }
 }
 
-fn read_config_file(path: &std::path::Path) -> HashMap<String, String> {
+pub fn read_config_file(path: &std::path::Path) -> HashMap<String, String> {
     let mut map = HashMap::new();
     if let Ok(content) = std::fs::read_to_string(path) {
         for line in content.lines() {
@@ -74,13 +74,13 @@ fn read_config_file(path: &std::path::Path) -> HashMap<String, String> {
     map
 }
 
-fn parse_u16(env_key: &str, file_val: Option<&str>, default: u16) -> u16 {
+pub fn parse_u16(env_key: &str, file_val: Option<&str>, default: u16) -> u16 {
     std::env::var(env_key).ok().and_then(|v| v.parse().ok())
         .or_else(|| file_val.and_then(|v| v.parse().ok()))
         .unwrap_or(default)
 }
 
-fn parse_str(env_key: &str, file_val: Option<&str>, default: &str) -> String {
+pub fn parse_str(env_key: &str, file_val: Option<&str>, default: &str) -> String {
     std::env::var(env_key).ok()
         .or_else(|| file_val.map(str::to_string))
         .unwrap_or_else(|| default.to_string())

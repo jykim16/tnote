@@ -11,7 +11,10 @@
       "Bash(tnote install:*)",
       "Bash(tmux:*)",
       "Bash(tmux list-sessions:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(cargo tarpaulin:*)",
+      "Bash(cargo test:*)",
+      "Bash(git fetch:*)"
     ]
   }
 }

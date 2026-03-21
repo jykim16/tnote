@@ -4,11 +4,21 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub fn which(cmd: &str) -> bool {
+    std::process::Command::new("which")
+        .arg(cmd)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 fn user_tmux_conf() -> Option<PathBuf> {
     std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".tmux.conf"))
 }
 
-fn add_source_line(user_conf: &Path, source_path: &Path) -> std::io::Result<()> {
+pub fn add_source_line(user_conf: &Path, source_path: &Path) -> std::io::Result<()> {
     let line = format!("source-file {}", source_path.display());
     let content = fs::read_to_string(user_conf).unwrap_or_default();
     if content.lines().any(|l| l.trim() == line) {
@@ -22,7 +32,7 @@ fn add_source_line(user_conf: &Path, source_path: &Path) -> std::io::Result<()> 
     Ok(())
 }
 
-fn remove_source_line(user_conf: &Path, source_path: &Path) -> std::io::Result<()> {
+pub fn remove_source_line(user_conf: &Path, source_path: &Path) -> std::io::Result<()> {
     let Ok(content) = fs::read_to_string(user_conf) else { return Ok(()); };
     let line = format!("source-file {}", source_path.display());
     let filtered: Vec<&str> = content.lines().filter(|l| l.trim() != line).collect();

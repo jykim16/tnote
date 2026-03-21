@@ -1,8 +1,4 @@
-mod config;
-mod editor;
-mod install;
-mod notes;
-mod tmux;
+use tnote::{config, editor, install, notes, tmux};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use config::Config;
@@ -13,7 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(ValueEnum, Clone)]
-pub enum ClearScope {
+enum ClearScope {
     /// Remove files without a recognized prefix (tmux-, shell-, named-)
     Unprefixed,
     /// Remove all named notes
@@ -22,6 +18,18 @@ pub enum ClearScope {
     Tmux,
     /// Remove all notes
     All,
+
+}
+
+impl From<ClearScope> for notes::ClearScope {
+    fn from(s: ClearScope) -> Self {
+        match s {
+            ClearScope::Unprefixed => notes::ClearScope::Unprefixed,
+            ClearScope::Named      => notes::ClearScope::Named,
+            ClearScope::Tmux       => notes::ClearScope::Tmux,
+            ClearScope::All        => notes::ClearScope::All,
+        }
+    }
 }
 
 #[derive(Parser)]
@@ -78,7 +86,7 @@ fn main() {
         None => cmd_open(&config, &notes),
         Some(Cmd::Name { name }) => cmd_name(&notes, name.as_deref()),
         Some(Cmd::Show) => cmd_show(&notes),
-        Some(Cmd::Clean { all, named, dryrun }) => cmd_clean(&notes, all.as_ref(), named.as_deref(), *dryrun),
+        Some(Cmd::Clean { all, named, dryrun }) => cmd_clean(&notes, all.clone(), named.as_deref(), *dryrun),
         Some(Cmd::List) => cmd_list(&notes),
         Some(Cmd::Path) => cmd_path(&notes),
         Some(Cmd::Setup) => cmd_setup(&config),
@@ -90,7 +98,7 @@ fn main() {
                 .map(|s| s.to_string())
                 .or_else(|| std::env::var("TNOTE_WINDOW_KEY").ok())
                 .or_else(|| tmux::window_key())
-                .unwrap_or_else(|| shell_session_key());
+                .unwrap_or_else(|| notes::shell_session_key());
             cmd_popup_inline(&config, &notes, &key);
         }
     }
@@ -100,31 +108,12 @@ fn main() {
 
 fn current_note(notes: &Notes) -> (String, PathBuf) {
     let key = if tmux::is_in_tmux() {
-        tmux::window_key().unwrap_or_else(|| shell_session_key())
+        tmux::window_key().unwrap_or_else(|| notes::shell_session_key())
     } else {
-        shell_session_key()
+        notes::shell_session_key()
     };
     let file = notes.file_for_key(&key);
     (key, file)
-}
-
-/// Returns the PID of the parent shell process (tnote's direct parent).
-fn get_shell_pid() -> Option<u32> {
-    let pid = std::process::id().to_string();
-    std::process::Command::new("ps")
-        .args(["-o", "ppid=", "-p", &pid])
-        .output()
-        .ok()
-        .and_then(|out| String::from_utf8_lossy(&out.stdout).trim().parse::<u32>().ok())
-}
-
-/// Returns a stable key for the current terminal session by using the parent
-/// process PID (the shell). Unlike our own PID, the shell's PID is constant
-/// for the lifetime of the terminal session across multiple tnote invocations.
-fn shell_session_key() -> String {
-    get_shell_pid()
-        .map(|ppid| format!("shell-{}", ppid))
-        .unwrap_or_else(|| format!("pid-{}", std::process::id()))
 }
 
 // ── Subcommands ───────────────────────────────────────────────────────────────
@@ -211,7 +200,7 @@ fn cmd_show(notes: &Notes) {
             candidates.push(k);
         }
     }
-    candidates.push(shell_session_key());
+    candidates.push(notes::shell_session_key());
 
     // Expand any key that has a .link into the named key first.
     let resolved: Vec<(String, String, PathBuf)> = candidates.into_iter().map(|k| {
@@ -237,7 +226,7 @@ fn cmd_show(notes: &Notes) {
     println!("tnote show: (empty) [{}]", label.if_supports_color(Stdout, |t| t.dimmed()));
 }
 
-fn cmd_clean(notes: &Notes, scope: Option<&ClearScope>, named: Option<&str>, dry_run: bool) {
+fn cmd_clean(notes: &Notes, scope: Option<ClearScope>, named: Option<&str>, dry_run: bool) {
     let mut any = false;
 
     if let Some(name) = named {
@@ -258,7 +247,8 @@ fn cmd_clean(notes: &Notes, scope: Option<&ClearScope>, named: Option<&str>, dry
         }
     }
 
-    match notes.cleanup_orphaned(scope, dry_run) {
+    let lib_scope: Option<notes::ClearScope> = scope.map(Into::into);
+    match notes.cleanup_orphaned(lib_scope.as_ref(), dry_run) {
         Ok(removed) if !removed.is_empty() => {
             let verb = if dry_run { "would remove" } else { "removed" };
             for key in &removed {
@@ -408,7 +398,7 @@ fn prompt_editor(current: &str) -> String {
     let candidates = ["nvim", "vim", "vi", "nano", "emacs", "hx", "micro", "kak", "helix"];
     let available: Vec<&str> = candidates.iter()
         .copied()
-        .filter(|e| which(e))
+        .filter(|e| install::which(e))
         .collect();
 
     if available.is_empty() {
@@ -441,16 +431,6 @@ fn prompt_editor(current: &str) -> String {
         }
         return trimmed.to_string();
     }
-}
-
-fn which(cmd: &str) -> bool {
-    std::process::Command::new("which")
-        .arg(cmd)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
 }
 
 fn prompt(label: &str, default: &str) -> String {

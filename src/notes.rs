@@ -1,7 +1,35 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
-use crate::ClearScope;
+
+#[derive(Clone)]
+pub enum ClearScope {
+    /// Remove files without a recognized prefix (tmux-, shell-, named-)
+    Unprefixed,
+    /// Remove all named notes
+    Named,
+    /// Remove all tmux-keyed notes regardless of window liveness
+    Tmux,
+    /// Remove all notes
+    All,
+}
+
+/// Returns the PID of the parent shell process (tnote's direct parent).
+pub fn get_shell_pid() -> Option<u32> {
+    let pid = std::process::id().to_string();
+    std::process::Command::new("ps")
+        .args(["-o", "ppid=", "-p", &pid])
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8_lossy(&out.stdout).trim().parse::<u32>().ok())
+}
+
+/// Returns a stable key for the current shell session using the parent process PID.
+pub fn shell_session_key() -> String {
+    get_shell_pid()
+        .map(|ppid| format!("shell-{}", ppid))
+        .unwrap_or_else(|| format!("pid-{}", std::process::id()))
+}
 
 pub struct Notes {
     pub dir: PathBuf,
@@ -188,7 +216,7 @@ impl Notes {
 
     /// Builds a reverse map: note name → list of keys that link to it.
     /// e.g. "api-server" → ["tmux-work+0", "shell-12345"]
-    fn link_sources(&self) -> HashMap<String, Vec<String>> {
+    pub fn link_sources(&self) -> HashMap<String, Vec<String>> {
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
         let meta = self.meta_dir();
         if let Ok(entries) = fs::read_dir(&meta) {
@@ -261,79 +289,7 @@ impl Notes {
 
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
-    fn setup() -> (TempDir, Notes) {
-        let tmp = TempDir::new().expect("tempdir");
-        let notes = Notes::new(tmp.path().to_path_buf());
-        notes.ensure_dir().expect("ensure_dir");
-        (tmp, notes)
-    }
-
-    /// Naming a window with no prior note must create the named-.md file.
-    #[test]
-    fn name_window_creates_named_file_when_no_prior_note() {
-        let (_tmp, notes) = setup();
-
-        notes.name_window("tmux-test+0", "myproject").expect("name_window");
-
-        let named_file = notes.dir.join("named-myproject.md");
-        assert!(named_file.exists(), "named-myproject.md should be created");
-    }
-
-    /// The named note must appear in list_notes() even when it is empty.
-    #[test]
-    fn list_notes_includes_named_note_after_naming() {
-        let (_tmp, notes) = setup();
-
-        notes.name_window("tmux-test+0", "myproject").expect("name_window");
-
-        let list = notes.list_notes().expect("list_notes");
-        let named: Vec<_> = list.iter().filter(|(cat, _, _, _, _)| cat == "named").collect();
-        assert_eq!(named.len(), 1, "should list exactly one named note");
-        assert_eq!(named[0].1, "myproject");
-    }
-
-    /// Naming a window that already has content migrates it.
-    #[test]
-    fn name_window_migrates_existing_content() {
-        let (_tmp, notes) = setup();
-
-        let old_file = notes.dir.join("tmux-test+0.md");
-        fs::write(&old_file, "existing content\n").expect("write");
-
-        let migrated = notes.name_window("tmux-test+0", "myproject").expect("name_window");
-
-        assert!(migrated, "should report migration");
-        let named_file = notes.dir.join("named-myproject.md");
-        assert!(named_file.exists());
-        assert_eq!(fs::read_to_string(&named_file).unwrap(), "existing content\n");
-        assert!(!old_file.exists(), "old file should be removed after migration");
-    }
-
-    /// Naming preserves an existing named file if it already has content.
-    #[test]
-    fn name_window_does_not_overwrite_existing_named_file() {
-        let (_tmp, notes) = setup();
-
-        let named_file = notes.dir.join("named-myproject.md");
-        fs::write(&named_file, "important notes\n").expect("write");
-
-        notes.name_window("tmux-test+0", "myproject").expect("name_window");
-
-        assert_eq!(
-            fs::read_to_string(&named_file).unwrap(),
-            "important notes\n",
-            "existing named file content must not be overwritten"
-        );
-    }
-}
-
-fn is_pid_alive(pid: u32) -> bool {
+pub fn is_pid_alive(pid: u32) -> bool {
     std::process::Command::new("ps")
         .args(["-p", &pid.to_string()])
         .stdout(std::process::Stdio::null())

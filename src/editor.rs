@@ -202,7 +202,7 @@ fn cell_style(cell: &vt100::Cell) -> Style {
     style
 }
 
-fn vt100_color(color: vt100::Color) -> Color {
+pub fn vt100_color(color: vt100::Color) -> Color {
     match color {
         vt100::Color::Default      => Color::Reset,
         vt100::Color::Idx(n)       => Color::Indexed(n),
@@ -211,7 +211,7 @@ fn vt100_color(color: vt100::Color) -> Color {
 }
 
 /// Convert a crossterm key event into the byte sequence a terminal would send.
-fn key_to_bytes(key: KeyEvent) -> Vec<u8> {
+pub fn key_to_bytes(key: KeyEvent) -> Vec<u8> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt  = key.modifiers.contains(KeyModifiers::ALT);
 
