@@ -8,7 +8,7 @@ Running more than ten Claude Code sessions in parallel made it easy to get a lot
 
 tnote was built to solve that. It's lightweight and stays out of the way: a quick popup to check what you were doing, drop in a task list, jot down commands to run later, or record what you've already finished. One note per tmux window means your context lives exactly where you left it.
 
-Since notes are just markdown files, the agent uses tnote too. Tell it to log its progress there and you can check in any time — no summaries needed, no asking what it did. It's as simple as that.
+Since tnotes are just markdown files, my agents use tnote too. I tell it to log its progress in tnote or complete all the tasks I've listed in my tnote. It's as simple as that!
 
 ```
 ┌─────────────────────────────────────────────────┐
