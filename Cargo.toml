@@ -3,7 +3,7 @@ name = "tnote"
 version = "0.1.0"
 edition = "2021"
 description = "Per-tmux-window notepad"
-repository = "https://github.com/jkim/tnote"
+repository = "https://github.com/jykim16/tnote"
 license = "MIT"
 
 [[bin]]
