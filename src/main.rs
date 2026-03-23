@@ -106,8 +106,8 @@ fn main() {
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .or_else(|| std::env::var("TNOTE_WINDOW_KEY").ok())
-                .or_else(|| tmux::window_key())
-                .unwrap_or_else(|| notes::shell_session_key());
+                .or_else(tmux::window_key)
+                .unwrap_or_else(notes::shell_session_key);
             cmd_popup_inline(&config, &notes, &key);
         }
     }
@@ -117,7 +117,7 @@ fn main() {
 
 fn current_note(notes: &Notes) -> (String, PathBuf) {
     let key = if tmux::is_in_tmux() {
-        tmux::window_key().unwrap_or_else(|| notes::shell_session_key())
+        tmux::window_key().unwrap_or_else(notes::shell_session_key)
     } else {
         notes::shell_session_key()
     };

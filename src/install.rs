@@ -382,4 +382,168 @@ mod tests {
         assert!(content.ends_with('\n'));
         assert_eq!(content, "a\nb\n");
     }
+
+    // ── which ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn which_finds_sh() {
+        assert!(which("sh"));
+    }
+
+    #[test]
+    fn which_returns_false_for_nonexistent() {
+        assert!(!which("tnote_nonexistent_cmd_xyz"));
+    }
+
+    // ── detect_shell ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn detect_shell_returns_some() {
+        // $SHELL is set in most test environments
+        if std::env::var("SHELL").is_ok() {
+            assert!(detect_shell().is_some());
+        }
+    }
+
+    // ── shell_rc ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn shell_rc_zsh_returns_zshrc() {
+        if let Some(home) = home_dir() {
+            assert_eq!(shell_rc("zsh"), Some(home.join(".zshrc")));
+        }
+    }
+
+    #[test]
+    fn shell_rc_bash_returns_bashrc() {
+        if let Some(home) = home_dir() {
+            assert_eq!(shell_rc("bash"), Some(home.join(".bashrc")));
+        }
+    }
+
+    #[test]
+    fn shell_rc_unknown_returns_none() {
+        assert_eq!(shell_rc("powershell"), None);
+    }
+
+    // ── shell_binding ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn shell_binding_zsh() {
+        let b = shell_binding("zsh", "t").unwrap();
+        assert!(b.contains("bindkey"));
+        assert!(b.contains("\\C-t"));
+        assert!(b.contains("TMUX"));
+    }
+
+    #[test]
+    fn shell_binding_bash() {
+        let b = shell_binding("bash", "t").unwrap();
+        assert!(b.contains("bind"));
+        assert!(b.contains("\\C-t"));
+        assert!(b.contains("TMUX"));
+    }
+
+    #[test]
+    fn shell_binding_fish() {
+        let b = shell_binding("fish", "t").unwrap();
+        assert!(b.contains("bind \\ct"));
+        assert!(b.contains("TMUX"));
+    }
+
+    #[test]
+    fn shell_binding_unknown_returns_none() {
+        assert!(shell_binding("powershell", "t").is_none());
+    }
+
+    // ── remove_shell_block ────────────────────────────────────────────────────
+
+    #[test]
+    fn remove_shell_block_removes_marker_and_next_line() {
+        let content = format!("alias ls='ls -la'\n{}\nbindkey -s '\\C-t' 'tnote\\n'\nexport FOO=1\n", SHELL_MARKER);
+        let result = remove_shell_block(&content);
+        assert_eq!(result, "alias ls='ls -la'\nexport FOO=1\n");
+    }
+
+    #[test]
+    fn remove_shell_block_noop_when_no_marker() {
+        let content = "alias ls='ls -la'\nexport FOO=1\n";
+        assert_eq!(remove_shell_block(content), content);
+    }
+
+    #[test]
+    fn remove_shell_block_handles_marker_at_end() {
+        let content = format!("alias ls='ls -la'\n{}\nbindkey stuff\n", SHELL_MARKER);
+        let result = remove_shell_block(&content);
+        assert_eq!(result, "alias ls='ls -la'\n");
+    }
+
+    #[test]
+    fn remove_shell_block_empty_content() {
+        assert_eq!(remove_shell_block(""), "");
+    }
+
+    // ── add_shell_binding / remove_shell_binding ──────────────────────────────
+
+    #[test]
+    fn add_shell_binding_creates_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rc = tmp.path().join(".zshrc");
+        add_shell_binding(&rc, "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'\nbindkey stuff").unwrap();
+        let content = fs::read_to_string(&rc).unwrap();
+        assert!(content.contains(SHELL_MARKER));
+        assert!(content.contains("bindkey stuff"));
+    }
+
+    #[test]
+    fn add_shell_binding_appends_to_existing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rc = tmp.path().join(".zshrc");
+        fs::write(&rc, "export PATH=/usr/bin\n").unwrap();
+        add_shell_binding(&rc, "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'\nbindkey stuff").unwrap();
+        let content = fs::read_to_string(&rc).unwrap();
+        assert!(content.starts_with("export PATH=/usr/bin\n"));
+        assert!(content.contains("bindkey stuff"));
+    }
+
+    #[test]
+    fn add_shell_binding_replaces_existing_block() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rc = tmp.path().join(".zshrc");
+        fs::write(&rc, format!("before\n{}\nold binding\nafter\n", SHELL_MARKER)).unwrap();
+        add_shell_binding(&rc, "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'\nnew binding").unwrap();
+        let content = fs::read_to_string(&rc).unwrap();
+        assert!(!content.contains("old binding"));
+        assert!(content.contains("new binding"));
+        assert!(content.contains("before"));
+        assert!(content.contains("after"));
+    }
+
+    #[test]
+    fn remove_shell_binding_removes_block() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rc = tmp.path().join(".zshrc");
+        fs::write(&rc, format!("before\n{}\nbindkey stuff\nafter\n", SHELL_MARKER)).unwrap();
+        assert!(remove_shell_binding(&rc).unwrap());
+        let content = fs::read_to_string(&rc).unwrap();
+        assert!(!content.contains(SHELL_MARKER));
+        assert!(!content.contains("bindkey stuff"));
+        assert!(content.contains("before"));
+        assert!(content.contains("after"));
+    }
+
+    #[test]
+    fn remove_shell_binding_returns_false_when_no_block() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rc = tmp.path().join(".zshrc");
+        fs::write(&rc, "export FOO=1\n").unwrap();
+        assert!(!remove_shell_binding(&rc).unwrap());
+    }
+
+    #[test]
+    fn remove_shell_binding_returns_false_when_file_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rc = tmp.path().join(".zshrc");
+        assert!(!remove_shell_binding(&rc).unwrap());
+    }
 }

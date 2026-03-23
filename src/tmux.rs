@@ -148,8 +148,7 @@ pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if stderr.contains("protocol version mismatch") {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 "tmux popup: protocol version mismatch between tmux client and server \
                  (tmux was likely upgraded while a server was running) — \
                  kill the old server with `pkill tmux`, then start a fresh session",
@@ -157,20 +156,14 @@ pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config
         }
         match tmux_server_version() {
             Some((major, minor)) if major < 3 || (major == 3 && minor < 2) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!(
-                        "tmux popup: display-popup requires tmux 3.2+ (server is {}.{}); \
-                         please upgrade tmux",
-                        major, minor
-                    ),
-                ));
+                return Err(io::Error::other(format!(
+                    "tmux popup: display-popup requires tmux 3.2+ (server is {}.{}); \
+                     please upgrade tmux",
+                    major, minor
+                )));
             }
             _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "tmux popup: display-popup failed",
-                ));
+                return Err(io::Error::other("tmux popup: display-popup failed"));
             }
         }
     }

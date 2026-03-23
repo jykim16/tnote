@@ -153,7 +153,7 @@ impl Notes {
         for stem in stems {
             let dead = if let Some(s) = stem.strip_prefix("shell-") {
                 matches!(scope, Some(ClearScope::All))
-                    || s.parse::<u32>().map_or(false, |pid| !is_pid_alive(pid))
+                    || s.parse::<u32>().is_ok_and(|pid| !is_pid_alive(pid))
             } else if stem.starts_with("tmux-") {
                 // Superseded: a .link exists for this key, so the raw .md is redundant
                 let has_link = meta.join(format!("{}.link", &stem)).exists();
@@ -237,6 +237,7 @@ impl Notes {
     /// Returns (category, display_name, sources, line_count, path).
     /// Category is one of: "tmux", "named", "shell", "other".
     /// Sources is non-empty only for named notes — the keys that link to this note.
+    #[allow(clippy::type_complexity)]
     pub fn list_notes(&self) -> std::io::Result<Vec<(String, String, Vec<String>, usize, PathBuf)>> {
         let sources   = self.link_sources();
         let label_map = crate::tmux::window_label_map();

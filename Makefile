@@ -1,6 +1,6 @@
 INSTALL_PATH ?= $(HOME)/bin/tnote
 
-.PHONY: build install clean
+.PHONY: build install clean test integration-test
 
 build:
 	cargo build --release
@@ -11,3 +11,10 @@ install: build
 
 clean:
 	cargo clean
+
+test:
+	cargo test
+
+integration-test:
+	docker build -t tnote-integration -f tests/integration/Dockerfile .
+	docker run --rm tnote-integration

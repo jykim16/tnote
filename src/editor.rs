@@ -39,22 +39,22 @@ pub fn run(file: &Path, label: &str, width: u16, height: u16) -> io::Result<()> 
     let pty_system = portable_pty::native_pty_system();
     let pair = pty_system
         .openpty(PtySize { rows: init_ih, cols: init_iw, pixel_width: 0, pixel_height: 0 })
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
     let mut cmd = CommandBuilder::new(&editor);
     cmd.arg(file);
     let mut child = pair.slave
         .spawn_command(cmd)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
     drop(pair.slave);
 
     let mut pty_writer = pair.master
         .take_writer()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
     let mut pty_reader = pair.master
         .try_clone_reader()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     // Read PTY output on a background thread; send bytes to main thread.
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
@@ -218,7 +218,7 @@ pub fn key_to_bytes(key: KeyEvent) -> Vec<u8> {
     let mut bytes: Vec<u8> = match key.code {
         KeyCode::Char(c) if ctrl => {
             let c = c.to_ascii_lowercase();
-            if ('a'..='z').contains(&c) { vec![c as u8 - b'a' + 1] }
+            if c.is_ascii_lowercase() { vec![c as u8 - b'a' + 1] }
             else if c == ' '            { vec![0] }
             else                        { vec![] }
         }
@@ -271,9 +271,9 @@ fn paint_background(bg: &[u8]) -> io::Result<()> {
     } else {
         lines.len()
     };
-    for row in 0..count {
+    for (row, line) in lines.iter().enumerate().take(count) {
         execute!(io::stdout(), cursor::MoveTo(0, row as u16))?;
-        write!(io::stdout(), "{}", lines[row])?;
+        write!(io::stdout(), "{}", line)?;
     }
     io::stdout().flush()
 }

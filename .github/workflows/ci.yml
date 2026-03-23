@@ -17,3 +17,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test
       - run: cargo clippy -- -D warnings
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: docker build -t tnote-integration -f tests/integration/Dockerfile .
+      - run: docker run --rm tnote-integration
