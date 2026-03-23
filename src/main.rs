@@ -37,6 +37,9 @@ impl From<ClearScope> for notes::ClearScope {
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
+
+    /// Open a specific named note
+    name: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -44,7 +47,10 @@ enum Cmd {
     /// Name this window's note (also renames the tmux window)
     Name { name: Option<String> },
     /// Print note contents inline
-    Show,
+    Show {
+        /// Show a specific named note
+        name: Option<String>,
+    },
     /// Remove notes not tied to a running process or window
     Clean {
         /// Also remove notes in the given category: unprefixed, named, tmux, all
@@ -60,7 +66,10 @@ enum Cmd {
     /// List all notes with line counts
     List,
     /// Print the note file path
-    Path,
+    Path {
+        /// Show path for a specific named note
+        name: Option<String>,
+    },
     /// Configure editor, key binding, and dimensions, then install keybindings
     Setup,
     /// Remove tmux and shell keybindings
@@ -89,12 +98,12 @@ fn main() {
     }
 
     match &cli.command {
-        None => cmd_open(&config, &notes),
+        None => cmd_open(&config, &notes, cli.name.as_deref()),
         Some(Cmd::Name { name }) => cmd_name(&notes, name.as_deref()),
-        Some(Cmd::Show) => cmd_show(&notes),
+        Some(Cmd::Show { name }) => cmd_show(&notes, name.as_deref()),
         Some(Cmd::Clean { all, named, dryrun }) => cmd_clean(&notes, all.clone(), named.as_deref(), *dryrun),
         Some(Cmd::List) => cmd_list(&notes),
-        Some(Cmd::Path) => cmd_path(&notes),
+        Some(Cmd::Path { name }) => cmd_path(&notes, name.as_deref()),
         Some(Cmd::Setup) => cmd_setup(&config),
         Some(Cmd::Uninstall) => install::uninstall(&config),
         Some(Cmd::Help) => print_help(),
@@ -125,9 +134,20 @@ fn current_note(notes: &Notes) -> (String, PathBuf) {
     (key, file)
 }
 
+fn named_or_current(notes: &Notes, name: Option<&str>) -> (String, PathBuf) {
+    match name {
+        Some(n) => {
+            let key = format!("named-{}", n);
+            let file = notes.dir.join(format!("{}.md", key));
+            (key, file)
+        }
+        None => current_note(notes),
+    }
+}
+
 // ── Subcommands ───────────────────────────────────────────────────────────────
 
-fn cmd_open(config: &Config, notes: &Notes) {
+fn cmd_open(config: &Config, notes: &Notes, name: Option<&str>) {
     // First-run hint
     if !config.dir.join("meta").join("config").exists() {
         eprintln!("tnote: tip — run 'tnote setup' to configure keybindings and editor");
@@ -138,8 +158,11 @@ fn cmd_open(config: &Config, notes: &Notes) {
         return;
     }
 
-    let (key, file) = current_note(notes);
-    let label = notes.label_for_key(&key);
+    let (key, file) = named_or_current(notes, name);
+    let label = match name {
+        Some(n) => n.to_string(),
+        None => notes.label_for_key(&key),
+    };
 
     if !file.exists() {
         let _ = fs::write(&file, "");
@@ -214,7 +237,22 @@ fn cmd_name(notes: &Notes, name: Option<&str>) {
     }
 }
 
-fn cmd_show(notes: &Notes) {
+fn cmd_show(notes: &Notes, name: Option<&str>) {
+    if let Some(n) = name {
+        let file = notes.dir.join(format!("named-{}.md", n));
+        if file.exists() && file.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+            println!("{}", format!("── tnote: {} ──", n).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
+            match fs::read_to_string(&file) {
+                Ok(content) => print!("{}", content),
+                Err(e) => eprintln!("tnote show: {}", e.if_supports_color(Stderr, |t| t.red())),
+            }
+            println!("{}", "──────────────────────".if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
+        } else {
+            println!("tnote show: (empty) [{}]", n.if_supports_color(Stdout, |t| t.dimmed()));
+        }
+        return;
+    }
+
     // Resolve: named (via .link) → tmux → shell, show first non-empty.
     let mut candidates: Vec<String> = Vec::new();
     if tmux::is_in_tmux() {
@@ -387,8 +425,8 @@ fn cmd_list(notes: &Notes) {
     }
 }
 
-fn cmd_path(notes: &Notes) {
-    let (_, file) = current_note(notes);
+fn cmd_path(notes: &Notes, name: Option<&str>) {
+    let (_, file) = named_or_current(notes, name);
     println!("{}", file.display());
 }
 
