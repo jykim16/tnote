@@ -39,7 +39,7 @@ struct Cli {
     command: Option<Cmd>,
 
     /// Open a specific named note
-    #[arg(long)]
+    #[arg(short = 'n', long)]
     name: Option<String>,
 }
 
@@ -50,7 +50,7 @@ enum Cmd {
     /// Print note contents inline
     Show {
         /// Show a specific named note
-        #[arg(long)]
+        #[arg(short = 'n', long)]
         name: Option<String>,
     },
     /// Remove notes not tied to a running process or window
@@ -62,7 +62,7 @@ enum Cmd {
         #[arg(long, value_name = "NAME")]
         named: Option<String>,
         /// Print what would be removed without removing anything
-        #[arg(long)]
+        #[arg(short = 'n', long)]
         dryrun: bool,
     },
     /// List all notes with line counts
@@ -70,7 +70,7 @@ enum Cmd {
     /// Print the note file path
     Path {
         /// Show path for a specific named note
-        #[arg(long)]
+        #[arg(short = 'n', long)]
         name: Option<String>,
     },
     /// Configure editor, key binding, and dimensions, then install keybindings
