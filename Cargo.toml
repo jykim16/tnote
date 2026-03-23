@@ -2,8 +2,9 @@
 name = "tnote"
 version = "0.2.1"
 edition = "2021"
-description = "tmux enhancing notepad"
+description = "Terminal Notepad"
 repository = "https://github.com/jykim16/tnote"
+homepage = "https://github.com/jykim16/tnote"
 license = "MIT"
 
 [[bin]]
@@ -15,6 +16,8 @@ path = "src/lib.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+libc = "0.2"
 owo-colors = { version = "4", features = ["supports-colors"] }
 ratatui = "0.29"
 portable-pty = "0.8"
@@ -26,10 +29,14 @@ tempfile = "3"
 [workspace.metadata.dist]
 cargo-dist-version = "0.31.0"
 ci = ["github"]
-installers = ["shell"]
+installers = ["shell", "homebrew"]
 install-path = "~/.local/bin"
+tap = "jykim16/homebrew-tap"
+publish-jobs = ["homebrew"]
 targets = [
   "aarch64-apple-darwin",
+  "aarch64-unknown-linux-gnu",
+  "aarch64-unknown-linux-musl",
   "x86_64-apple-darwin",
   "x86_64-unknown-linux-gnu",
   "x86_64-unknown-linux-musl",

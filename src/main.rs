@@ -1,6 +1,6 @@
 use tnote::{config, editor, install, notes, tmux};
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use config::Config;
 use std::io::{self, Write};
 use notes::Notes;
@@ -33,7 +33,7 @@ impl From<ClearScope> for notes::ClearScope {
 }
 
 #[derive(Parser)]
-#[command(name = "tnote", about = "Per-tmux-window notepad", disable_help_subcommand = true, version)]
+#[command(name = "tnote", about = "Terminal Notepad", disable_help_subcommand = true, version)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
@@ -61,12 +61,18 @@ enum Cmd {
     List,
     /// Print the note file path
     Path,
-    /// Configure editor, key binding, and dimensions, then install
+    /// Configure editor, key binding, and dimensions, then install keybindings
     Setup,
-    /// Remove the tmux keybinding
+    /// Remove tmux and shell keybindings
     Uninstall,
     /// Show usage
     Help,
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     /// Internal: run editor inline when already inside a tmux display-popup
     #[command(hide = true)]
     Popup { window_key: Option<String> },
@@ -92,6 +98,9 @@ fn main() {
         Some(Cmd::Setup) => cmd_setup(&config),
         Some(Cmd::Uninstall) => install::uninstall(&config),
         Some(Cmd::Help) => print_help(),
+        Some(Cmd::Completions { shell }) => {
+            clap_complete::generate(*shell, &mut Cli::command(), "tnote", &mut std::io::stdout());
+        }
         Some(Cmd::Popup { window_key }) => {
             let key = window_key.as_deref()
                 .filter(|s| !s.is_empty())
@@ -119,6 +128,11 @@ fn current_note(notes: &Notes) -> (String, PathBuf) {
 // ── Subcommands ───────────────────────────────────────────────────────────────
 
 fn cmd_open(config: &Config, notes: &Notes) {
+    // First-run hint
+    if !config.dir.join("meta").join("config").exists() {
+        eprintln!("tnote: tip — run 'tnote setup' to configure keybindings and editor");
+    }
+
     if tmux::is_in_tmux() && tmux::is_popup_session() {
         let _ = std::process::Command::new("tmux").args(["detach-client"]).status();
         return;
@@ -138,7 +152,11 @@ fn cmd_open(config: &Config, notes: &Notes) {
     };
 
     if let Err(e) = result {
-        eprintln!("tnote: {}", e);
+        if e.kind() == std::io::ErrorKind::NotFound {
+            eprintln!("tnote: editor '{}' not found — run 'tnote setup' to configure", config.editor);
+        } else {
+            eprintln!("tnote: {}", e);
+        }
         std::process::exit(1);
     }
 }
@@ -156,7 +174,11 @@ fn cmd_popup_inline(_config: &Config, notes: &Notes, key: &str) {
         .status();
 
     if let Err(e) = status {
-        eprintln!("tnote: failed to run {}: {}", editor, e);
+        if e.kind() == std::io::ErrorKind::NotFound {
+            eprintln!("tnote: editor '{}' not found — run 'tnote setup' to configure", editor);
+        } else {
+            eprintln!("tnote: failed to run {}: {}", editor, e);
+        }
         std::process::exit(1);
     }
 }
@@ -374,7 +396,7 @@ fn cmd_setup(config: &Config) {
     println!("tnote setup\n");
 
     let editor = prompt_editor(&config.editor);
-    let key    = prompt("Key (prefix+?)", &config.key);
+    let key    = prompt("Key (tmux: prefix+?, shell: Ctrl+?)", &config.key);
     let width  = prompt_u16("Popup width",  config.width);
     let height = prompt_u16("Popup height", config.height);
 
@@ -454,29 +476,27 @@ fn prompt_u16(label: &str, default: u16) -> u16 {
 
 fn print_help() {
     println!(
-        "tnote — per-tmux-window notepad
+        "tnote — Terminal Notepad
 
 USAGE:
-  tnote                  Open editor for the current window
-  tnote name <name>      Name this window's note (also renames the tmux window)
-  tnote name             Interactive name prompt (tmux only)
-  tnote show             Print note contents inline
-  tnote clean            Remove orphaned notes and popup sessions
-  tnote clean --dryrun   Show what would be removed without removing anything
-  tnote list             List all notes with line counts
-  tnote path             Print the note file path
-  tnote setup            Configure and install tmux key binding
-  tnote uninstall        Remove the tmux keybinding
-  tnote help             Show this help
+  tnote                            Open editor for the current window
+  tnote name <name>                Name this window's note (also renames the tmux window)
+  tnote show                       Print note contents inline
+  tnote clean [--dryrun]           Remove orphaned notes and popup sessions
+  tnote list                       List all notes with line counts
+  tnote path                       Print the note file path
+  tnote setup                      Configure and install keybindings
+  tnote uninstall                  Remove tmux and shell keybindings
+  tnote help                       Show this help
 
 TMUX COMMAND LINE (works while a process is running):
   Press ':' in any tmux window, then type:
     tnote              Open note popup
     tnote-name         Interactive name prompt
     tnote-show         Print note contents
+    tnote-clean        Remove orphaned notes
     tnote-list         List all notes
     tnote-path         Print the note file path
-    tnote-clean        Remove orphaned notes
     tnote-help         Show this help
   Requires 'tnote setup' to install the ':tnote' command aliases.
 
@@ -490,9 +510,9 @@ NOTE TYPES:
   shell   One note per shell session (parent PID), used outside tmux.
           Cleared by 'tnote clean' once the shell process exits.
 
-ENVIRONMENT:
+ENVIRONMENT (configurable via 'tnote setup'):
   TNOTE_DIR              Note storage directory  (default: ~/.tnote)
-  TNOTE_KEY              Tmux key binding        (default: t, used as prefix+t)
+  TNOTE_KEY              Key binding             (default: t, tmux: prefix+t, shell: Ctrl+t)
   TNOTE_WIDTH            Popup width in columns  (default: 62)
   TNOTE_HEIGHT           Popup height in lines   (default: 22)"
     );

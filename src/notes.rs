@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io;
 use std::path::PathBuf;
 
 #[derive(Clone)]
@@ -16,12 +17,9 @@ pub enum ClearScope {
 
 /// Returns the PID of the parent shell process (tnote's direct parent).
 pub fn get_shell_pid() -> Option<u32> {
-    let pid = std::process::id().to_string();
-    std::process::Command::new("ps")
-        .args(["-o", "ppid=", "-p", &pid])
-        .output()
-        .ok()
-        .and_then(|out| String::from_utf8_lossy(&out.stdout).trim().parse::<u32>().ok())
+    // /proc/self/stat is not available on macOS, so we use getppid() via libc.
+    let ppid = unsafe { libc::getppid() };
+    if ppid > 0 { Some(ppid as u32) } else { None }
 }
 
 /// Returns a stable key for the current shell session using the parent process PID.
@@ -290,13 +288,10 @@ impl Notes {
 }
 
 pub fn is_pid_alive(pid: u32) -> bool {
-    std::process::Command::new("ps")
-        .args(["-p", &pid.to_string()])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(true)
+    // kill(pid, 0) checks process existence without sending a signal.
+    // Returns 0 if process exists. On error, ESRCH means not found;
+    // EPERM means it exists but we lack permission — still alive.
+    unsafe { libc::kill(pid as i32, 0) == 0 || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH) }
 }
 
 #[cfg(test)]
