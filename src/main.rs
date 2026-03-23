@@ -472,11 +472,13 @@ USAGE:
 TMUX COMMAND LINE (works while a process is running):
   Press ':' in any tmux window, then type:
     tnote              Open note popup
-    tnote name <name>  Name current window's note
-    tnote name         Interactive name prompt
-    tnote show         Print note contents
-    tnote list         List all notes
-  Requires 'tnote setup' to install the ':tnote' command alias.
+    tnote-name         Interactive name prompt
+    tnote-show         Print note contents
+    tnote-list         List all notes
+    tnote-path         Print the note file path
+    tnote-clean        Remove orphaned notes
+    tnote-help         Show this help
+  Requires 'tnote setup' to install the ':tnote' command aliases.
 
 NOTE TYPES:
   tmux    One note per tmux window, keyed to <session>+<window> (e.g. work+0).

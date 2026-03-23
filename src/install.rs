@@ -76,7 +76,13 @@ pub fn run(config: &Config) {
         "# tnote key bindings — managed by 'tnote setup' / 'tnote uninstall'\n\
          unbind-key {key}\n\
          bind-key {key} run-shell 'tnote'\n\
-         set -s command-alias[100] 'tnote=run-shell tnote %*'\n",
+         set -s command-alias[100] \"tnote=run-shell 'tnote'\"\n\
+         set -s command-alias[101] \"tnote-show=run-shell 'tnote show'\"\n\
+         set -s command-alias[102] \"tnote-list=run-shell 'tnote list'\"\n\
+         set -s command-alias[103] \"tnote-path=run-shell 'tnote path'\"\n\
+         set -s command-alias[104] \"tnote-clean=run-shell 'tnote clean'\"\n\
+         set -s command-alias[105] \"tnote-help=run-shell 'tnote help'\"\n\
+         set -s command-alias[106] \"tnote-name=run-shell 'tnote name'\"\n",
         key = key,
     );
 
@@ -120,8 +126,16 @@ pub fn uninstall(config: &Config) {
     let tmux_conf_path = config.dir.join("meta").join("tmux.conf");
     let key = &config.key;
     let cleared = format!(
-        "# tnote key bindings — cleared by 'tnote uninstall'\nunbind-key {}\nset -su command-alias[100]\n",
-        key
+        "# tnote key bindings — cleared by 'tnote uninstall'\n\
+         unbind-key {key}\n\
+         set -su command-alias[100]\n\
+         set -su command-alias[101]\n\
+         set -su command-alias[102]\n\
+         set -su command-alias[103]\n\
+         set -su command-alias[104]\n\
+         set -su command-alias[105]\n\
+         set -su command-alias[106]\n",
+        key = key
     );
 
     match fs::write(&tmux_conf_path, &cleared) {
