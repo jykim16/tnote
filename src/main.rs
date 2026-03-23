@@ -243,7 +243,11 @@ fn cmd_name(notes: &Notes, name: Option<&str>) {
 fn cmd_show(notes: &Notes, name: Option<&str>) {
     if let Some(n) = name {
         let file = notes.dir.join(format!("named-{}.md", n));
-        if file.exists() && file.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+        if !file.exists() {
+            eprintln!("tnote show: named note '{}' not found", n);
+            std::process::exit(1);
+        }
+        if file.metadata().map(|m| m.len() > 0).unwrap_or(false) {
             println!("{}", format!("── tnote: {} ──", n).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
             match fs::read_to_string(&file) {
                 Ok(content) => print!("{}", content),
@@ -429,7 +433,16 @@ fn cmd_list(notes: &Notes) {
 }
 
 fn cmd_path(notes: &Notes, name: Option<&str>) {
-    let (_, file) = named_or_current(notes, name);
+    if let Some(n) = name {
+        let file = notes.dir.join(format!("named-{}.md", n));
+        if !file.exists() {
+            eprintln!("tnote path: named note '{}' not found", n);
+            std::process::exit(1);
+        }
+        println!("{}", file.display());
+        return;
+    }
+    let (_, file) = current_note(notes);
     println!("{}", file.display());
 }
 
