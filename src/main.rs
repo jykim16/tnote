@@ -59,10 +59,10 @@ enum Cmd {
         #[arg(long, value_name = "CATEGORY")]
         all: Option<ClearScope>,
         /// Remove a specific named note by name
-        #[arg(long, value_name = "NAME")]
-        named: Option<String>,
+        #[arg(short = 'n', long, value_name = "NAME")]
+        name: Option<String>,
         /// Print what would be removed without removing anything
-        #[arg(short = 'n', long)]
+        #[arg(long)]
         dryrun: bool,
     },
     /// List all notes with line counts
@@ -104,7 +104,7 @@ fn main() {
         None => cmd_open(&config, &notes, cli.name.as_deref()),
         Some(Cmd::Name { name }) => cmd_name(&notes, name.as_deref()),
         Some(Cmd::Show { name }) => cmd_show(&notes, name.as_deref()),
-        Some(Cmd::Clean { all, named, dryrun }) => cmd_clean(&notes, all.clone(), named.as_deref(), *dryrun),
+        Some(Cmd::Clean { all, name, dryrun }) => cmd_clean(&notes, all.clone(), name.as_deref(), *dryrun),
         Some(Cmd::List) => cmd_list(&notes),
         Some(Cmd::Path { name }) => cmd_path(&notes, name.as_deref()),
         Some(Cmd::Setup) => cmd_setup(&config),

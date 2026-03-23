@@ -208,7 +208,7 @@ fn clean_named_removes_named_note() {
     let dir = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("meta")).unwrap();
     fs::write(dir.path().join("named-deleteme.md"), "bye\n").unwrap();
-    assert!(exit_ok(tnote(dir.path()).args(["clean", "--named", "deleteme"])));
+    assert!(exit_ok(tnote(dir.path()).args(["clean", "--name", "deleteme"])));
     assert!(!dir.path().join("named-deleteme.md").exists());
 }
 
@@ -216,9 +216,9 @@ fn clean_named_removes_named_note() {
 fn clean_named_not_found_exits_nonzero() {
     let dir = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("meta")).unwrap();
-    let status = tnote(dir.path()).args(["clean", "--named", "ghost"]).output().unwrap().status;
+    let status = tnote(dir.path()).args(["clean", "--name", "ghost"]).output().unwrap().status;
     assert!(!status.success());
-    let err = stderr(tnote(dir.path()).args(["clean", "--named", "ghost"]));
+    let err = stderr(tnote(dir.path()).args(["clean", "--name", "ghost"]));
     assert!(err.contains("not found"));
 }
 
