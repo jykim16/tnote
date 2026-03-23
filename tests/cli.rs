@@ -377,3 +377,69 @@ fn uninstall_removes_source_line_from_tmux_conf() {
     let content = fs::read_to_string(&user_conf).unwrap();
     assert!(!content.contains("source-file"));
 }
+
+// ── --name flag ───────────────────────────────────────────────────────────────
+
+#[test]
+fn show_name_not_found_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    let status = tnote(dir.path()).args(["show", "--name", "ghost"]).output().unwrap().status;
+    assert!(!status.success());
+    let err = stderr(&mut tnote(dir.path()).args(["show", "--name", "ghost"]));
+    assert!(err.contains("named note 'ghost' not found"));
+}
+
+#[test]
+fn path_name_not_found_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    let status = tnote(dir.path()).args(["path", "--name", "ghost"]).output().unwrap().status;
+    assert!(!status.success());
+    let err = stderr(&mut tnote(dir.path()).args(["path", "--name", "ghost"]));
+    assert!(err.contains("named note 'ghost' not found"));
+}
+
+#[test]
+fn show_name_prints_named_note() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-todo.md"), "buy milk\n").unwrap();
+    let output = tnote(dir.path()).args(["show", "--name", "todo"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("buy milk"));
+}
+
+#[test]
+fn path_name_prints_named_path() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-todo.md"), "").unwrap();
+    let output = tnote(dir.path()).args(["path", "--name", "todo"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("named-todo.md"));
+}
+
+#[test]
+fn clean_name_removes_named_note() {
+    let dir = TempDir::new().unwrap();
+    let note = dir.path().join("named-temp.md");
+    fs::write(&note, "data").unwrap();
+    assert!(exit_ok(&mut tnote(dir.path()).args(["clean", "--name", "temp"])));
+    assert!(!note.exists());
+}
+
+#[test]
+fn clean_name_not_found_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    let status = tnote(dir.path()).args(["clean", "--name", "ghost"]).output().unwrap().status;
+    assert!(!status.success());
+}
+
+#[test]
+fn show_name_shorthand_works() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-x.md"), "hello\n").unwrap();
+    let output = tnote(dir.path()).args(["show", "-n", "x"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("hello"));
+}
