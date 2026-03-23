@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 pub struct Config {
     pub dir: PathBuf,
-    pub width: u16,
-    pub height: u16,
+    pub width: String,
+    pub height: String,
     pub key: String,
     pub editor: String,
 }
@@ -42,8 +42,8 @@ impl Config {
         let file = read_config_file(&dir.join("meta").join("config"));
 
         Config {
-            width:  parse_u16("TNOTE_WIDTH",  file.get("width").map(String::as_str),  62),
-            height: parse_u16("TNOTE_HEIGHT", file.get("height").map(String::as_str), 22),
+            width:  parse_str("TNOTE_WIDTH",  file.get("width").map(String::as_str),  "100%"),
+            height: parse_str("TNOTE_HEIGHT", file.get("height").map(String::as_str), "50%"),
             key:    parse_str("TNOTE_KEY",    file.get("key").map(String::as_str),    "t"),
             editor: parse_str("EDITOR",       file.get("editor").map(String::as_str), "vim"),
             dir,
@@ -72,12 +72,6 @@ pub fn read_config_file(path: &std::path::Path) -> HashMap<String, String> {
         }
     }
     map
-}
-
-pub fn parse_u16(env_key: &str, file_val: Option<&str>, default: u16) -> u16 {
-    std::env::var(env_key).ok().and_then(|v| v.parse().ok())
-        .or_else(|| file_val.and_then(|v| v.parse().ok()))
-        .unwrap_or(default)
 }
 
 pub fn parse_str(env_key: &str, file_val: Option<&str>, default: &str) -> String {
@@ -131,28 +125,6 @@ mod tests {
         assert_eq!(map.get("editor").map(String::as_str), Some("vim"));
     }
 
-    // ── parse_u16 ─────────────────────────────────────────────────────────────
-
-    #[test]
-    fn parse_u16_uses_file_val_when_env_absent() {
-        assert_eq!(parse_u16(ABSENT, Some("42"), 0), 42);
-    }
-
-    #[test]
-    fn parse_u16_uses_default_when_both_absent() {
-        assert_eq!(parse_u16(ABSENT, None, 99), 99);
-    }
-
-    #[test]
-    fn parse_u16_falls_back_to_default_on_invalid_file_val() {
-        assert_eq!(parse_u16(ABSENT, Some("bad"), 7), 7);
-    }
-
-    #[test]
-    fn parse_u16_falls_back_to_default_on_overflow_file_val() {
-        assert_eq!(parse_u16(ABSENT, Some("99999"), 7), 7);
-    }
-
     // ── parse_str ─────────────────────────────────────────────────────────────
 
     #[test]
@@ -174,8 +146,8 @@ mod tests {
             dir:    tmp.path().to_path_buf(),
             editor: "nano".to_string(),
             key:    "n".to_string(),
-            width:  100,
-            height: 30,
+            width:  "100".to_string(),
+            height: "30".to_string(),
         };
         cfg.save().unwrap();
         let content = std::fs::read_to_string(tmp.path().join("meta/config")).unwrap();
@@ -192,8 +164,8 @@ mod tests {
             dir:    tmp.path().to_path_buf(),
             editor: "hx".to_string(),
             key:    "g".to_string(),
-            width:  70,
-            height: 25,
+            width:  "70".to_string(),
+            height: "25".to_string(),
         };
         cfg.save().unwrap();
         let map = read_config_file(&tmp.path().join("meta/config"));

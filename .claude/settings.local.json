@@ -14,7 +14,20 @@
       "Bash(ls:*)",
       "Bash(cargo tarpaulin:*)",
       "Bash(cargo test:*)",
-      "Bash(git fetch:*)"
+      "Bash(git fetch:*)",
+      "WebSearch",
+      "Bash(git stash:*)",
+      "Bash(sed -i '' 's/^width=.*/width=100%/' ~/.tnote/meta/config)",
+      "Bash(sed -i '' 's/^height=.*/height=50%/' ~/.tnote/meta/config)",
+      "Read(//Users/jonkimj/.tnote/meta/**)",
+      "Bash(mkdir -p /Volumes/workplace/vibe/tnote/.claude/skills/tnote-track /Volumes/workplace/vibe/tnote/.claude/skills/tnote-summarize /Volumes/workplace/vibe/tnote/.claude/skills/tnote-plan)",
+      "Bash(cp /Volumes/workplace/vibe/tnote/skills/tnote-track/SKILL.md /Volumes/workplace/vibe/tnote/.claude/skills/tnote-track/SKILL.md)",
+      "Bash(cp /Volumes/workplace/vibe/tnote/skills/tnote-summarize/SKILL.md /Volumes/workplace/vibe/tnote/.claude/skills/tnote-summarize/SKILL.md)",
+      "Bash(cp /Volumes/workplace/vibe/tnote/skills/tnote-plan/SKILL.md /Volumes/workplace/vibe/tnote/.claude/skills/tnote-plan/SKILL.md)",
+      "Bash(rmdir /Volumes/workplace/vibe/tnote/.claude/commands)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:developers.openai.com)",
+      "Bash(git add:*)"
     ]
   }
 }

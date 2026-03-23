@@ -443,3 +443,38 @@ fn show_name_shorthand_works() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("hello"));
 }
+
+#[test]
+fn show_name_glob_matches_multiple_notes() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-proj-auth-login.md"),   "login content\n").unwrap();
+    fs::write(dir.path().join("named-proj-auth-session.md"), "session content\n").unwrap();
+    fs::write(dir.path().join("named-other-api-search.md"),  "search content\n").unwrap();
+    let output = tnote(dir.path()).args(["show", "--name", "proj-*"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("login content"));
+    assert!(stdout.contains("session content"));
+    assert!(!stdout.contains("search content"));
+}
+
+#[test]
+fn show_name_glob_no_matches_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    let status = tnote(dir.path()).args(["show", "--name", "ghost-*"]).output().unwrap().status;
+    assert!(!status.success());
+}
+
+#[test]
+fn show_name_glob_mid_pattern() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-proj-auth-login.md"),  "auth login\n").unwrap();
+    fs::write(dir.path().join("named-proj-api-login.md"),   "api login\n").unwrap();
+    fs::write(dir.path().join("named-proj-auth-logout.md"), "auth logout\n").unwrap();
+    let output = tnote(dir.path()).args(["show", "--name", "proj-*-login"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("auth login"));
+    assert!(stdout.contains("api login"));
+    assert!(!stdout.contains("auth logout"));
+}

@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 use tempfile::TempDir;
-use tnote::config::{read_config_file, parse_u16, parse_str, Config};
+use tnote::config::{read_config_file, parse_str, Config};
 
 // Serialize tests that mutate env vars.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -44,42 +44,6 @@ fn test_read_config_file_trims_whitespace() {
     assert_eq!(map.get("editor").map(String::as_str), Some("nvim"));
 }
 
-// ── parse_u16 ────────────────────────────────────────────────────────────────
-
-#[test]
-fn test_parse_u16_env_takes_precedence() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    std::env::set_var("_TNOTE_TEST_U16", "99");
-    let v = parse_u16("_TNOTE_TEST_U16", Some("50"), 10);
-    std::env::remove_var("_TNOTE_TEST_U16");
-    assert_eq!(v, 99);
-}
-
-#[test]
-fn test_parse_u16_file_fallback() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    std::env::remove_var("_TNOTE_TEST_U16B");
-    let v = parse_u16("_TNOTE_TEST_U16B", Some("42"), 10);
-    assert_eq!(v, 42);
-}
-
-#[test]
-fn test_parse_u16_default() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    std::env::remove_var("_TNOTE_TEST_U16C");
-    let v = parse_u16("_TNOTE_TEST_U16C", None, 7);
-    assert_eq!(v, 7);
-}
-
-#[test]
-fn test_parse_u16_invalid_env_uses_file() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    std::env::set_var("_TNOTE_TEST_U16D", "not_a_number");
-    let v = parse_u16("_TNOTE_TEST_U16D", Some("55"), 1);
-    std::env::remove_var("_TNOTE_TEST_U16D");
-    assert_eq!(v, 55);
-}
-
 // ── parse_str ────────────────────────────────────────────────────────────────
 
 #[test]
@@ -116,8 +80,8 @@ fn test_save_writes_correct_format() {
         dir:    dir.path().to_path_buf(),
         editor: "nvim".into(),
         key:    "n".into(),
-        width:  100,
-        height: 30,
+        width:  "100".into(),
+        height: "30".into(),
     };
     cfg.save().unwrap();
     let content = std::fs::read_to_string(dir.path().join("meta").join("config")).unwrap();
@@ -135,8 +99,8 @@ fn test_save_round_trip() {
         dir:    dir.path().to_path_buf(),
         editor: "nano".into(),
         key:    "u".into(),
-        width:  50,
-        height: 15,
+        width:  "50".into(),
+        height: "15".into(),
     };
     cfg.save().unwrap();
 
@@ -150,8 +114,8 @@ fn test_save_round_trip() {
 
     assert_eq!(loaded.editor, "nano");
     assert_eq!(loaded.key,    "u");
-    assert_eq!(loaded.width,  50);
-    assert_eq!(loaded.height, 15);
+    assert_eq!(loaded.width,  "50");
+    assert_eq!(loaded.height, "15");
 }
 
 #[test]
@@ -165,8 +129,8 @@ fn test_from_env_defaults_when_no_config_file() {
     std::env::remove_var("EDITOR");
     let cfg = Config::from_env();
     std::env::remove_var("TNOTE_DIR");
-    assert_eq!(cfg.width,  62);
-    assert_eq!(cfg.height, 22);
+    assert_eq!(cfg.width,  "100%");
+    assert_eq!(cfg.height, "50%");
     assert_eq!(cfg.key,    "t");
 }
 

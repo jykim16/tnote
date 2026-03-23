@@ -174,7 +174,7 @@ fn cmd_open(config: &Config, notes: &Notes, name: Option<&str>) {
     let result = if tmux::is_in_tmux() {
         tmux::open_popup_session(&file, &key, config)
     } else {
-        editor::run(&file, &label, config.width, config.height)
+        editor::run(&file, &label, &config.width, &config.height)
     };
 
     if let Err(e) = result {
@@ -240,23 +240,68 @@ fn cmd_name(notes: &Notes, name: Option<&str>) {
     }
 }
 
+fn show_named_note(notes: &Notes, n: &str) {
+    let file = notes.dir.join(format!("named-{}.md", n));
+    if !file.exists() {
+        eprintln!("tnote show: named note '{}' not found", n);
+        std::process::exit(1);
+    }
+    if file.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+        println!("{}", format!("── tnote: {} ──", n).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
+        match fs::read_to_string(&file) {
+            Ok(content) => print!("{}", content),
+            Err(e) => eprintln!("tnote show: {}", e.if_supports_color(Stderr, |t| t.red())),
+        }
+        println!("{}", "──────────────────────".if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
+    } else {
+        println!("tnote show: (empty) [{}]", n.if_supports_color(Stdout, |t| t.dimmed()));
+    }
+}
+
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let parts: Vec<&str> = pattern.split('*').collect();
+    if parts.len() == 1 {
+        return pattern == text;
+    }
+    if !text.starts_with(parts[0]) {
+        return false;
+    }
+    let mut pos = parts[0].len();
+    for part in &parts[1..parts.len() - 1] {
+        match text[pos..].find(part) {
+            Some(i) => pos += i + part.len(),
+            None => return false,
+        }
+    }
+    let last = parts[parts.len() - 1];
+    if last.is_empty() { true } else { text[pos..].contains(last) && text.ends_with(last) }
+}
+
 fn cmd_show(notes: &Notes, name: Option<&str>) {
     if let Some(n) = name {
-        let file = notes.dir.join(format!("named-{}.md", n));
-        if !file.exists() {
-            eprintln!("tnote show: named note '{}' not found", n);
-            std::process::exit(1);
-        }
-        if file.metadata().map(|m| m.len() > 0).unwrap_or(false) {
-            println!("{}", format!("── tnote: {} ──", n).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
-            match fs::read_to_string(&file) {
-                Ok(content) => print!("{}", content),
-                Err(e) => eprintln!("tnote show: {}", e.if_supports_color(Stderr, |t| t.red())),
+        if n.contains('*') {
+            let mut matches: Vec<String> = fs::read_dir(&notes.dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| {
+                    let fname = e.file_name();
+                    let s = fname.to_string_lossy();
+                    let stem = s.strip_prefix("named-")?.strip_suffix(".md")?;
+                    if glob_match(n, stem) { Some(stem.to_string()) } else { None }
+                })
+                .collect();
+            matches.sort();
+            if matches.is_empty() {
+                eprintln!("tnote show: no notes matching '{}'", n);
+                std::process::exit(1);
             }
-            println!("{}", "──────────────────────".if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
-        } else {
-            println!("tnote show: (empty) [{}]", n.if_supports_color(Stdout, |t| t.dimmed()));
+            for note_name in &matches {
+                show_named_note(notes, note_name);
+            }
+            return;
         }
+        show_named_note(notes, n);
         return;
     }
 
@@ -451,8 +496,8 @@ fn cmd_setup(config: &Config) {
 
     let editor = prompt_editor(&config.editor);
     let key    = prompt("Key (tmux: prefix+?, shell: Ctrl+?)", &config.key);
-    let width  = prompt_u16("Popup width",  config.width);
-    let height = prompt_u16("Popup height", config.height);
+    let width  = prompt("Popup width  (e.g. 100%, 80)", &config.width);
+    let height = prompt("Popup height (e.g. 50%, 22)",  &config.height);
 
     let new_config = Config {
         dir:    config.dir.clone(),
@@ -518,16 +563,6 @@ fn prompt(label: &str, default: &str) -> String {
     if trimmed.is_empty() { default.to_string() } else { trimmed.to_string() }
 }
 
-fn prompt_u16(label: &str, default: u16) -> u16 {
-    loop {
-        let s = prompt(label, &default.to_string());
-        match s.parse() {
-            Ok(v) => return v,
-            Err(_) => eprintln!("  please enter a number"),
-        }
-    }
-}
-
 fn print_help() {
     println!(
         "tnote — Terminal Notepad
@@ -536,6 +571,7 @@ USAGE:
   tnote                            Open editor for the current window
   tnote name <name>                Name this window's note (also renames the tmux window)
   tnote show                       Print note contents inline
+  tnote show --name 'proj-*'       Print all notes matching a pattern (quote the glob)
   tnote clean [--dryrun]           Remove orphaned notes and popup sessions
   tnote list                       List all notes with line counts
   tnote path                       Print the note file path
@@ -567,7 +603,44 @@ NOTE TYPES:
 ENVIRONMENT (configurable via 'tnote setup'):
   TNOTE_DIR              Note storage directory  (default: ~/.tnote)
   TNOTE_KEY              Key binding             (default: t, tmux: prefix+t, shell: Ctrl+t)
-  TNOTE_WIDTH            Popup width in columns  (default: 62)
-  TNOTE_HEIGHT           Popup height in lines   (default: 22)"
+  TNOTE_WIDTH            Popup width  (default: 100%, e.g. 80 or 75%)
+  TNOTE_HEIGHT           Popup height (default: 50%,  e.g. 22 or 40%)"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::glob_match;
+
+    #[test]
+    fn glob_exact_match() {
+        assert!(glob_match("foo", "foo"));
+        assert!(!glob_match("foo", "bar"));
+    }
+
+    #[test]
+    fn glob_trailing_wildcard() {
+        assert!(glob_match("proj-*", "proj-auth-login"));
+        assert!(glob_match("proj-*", "proj-"));
+        assert!(!glob_match("proj-*", "other-auth-login"));
+    }
+
+    #[test]
+    fn glob_leading_wildcard() {
+        assert!(glob_match("*-login", "proj-auth-login"));
+        assert!(!glob_match("*-login", "proj-auth-logout"));
+    }
+
+    #[test]
+    fn glob_mid_wildcard() {
+        assert!(glob_match("proj-*-login", "proj-auth-login"));
+        assert!(glob_match("proj-*-login", "proj-api-login"));
+        assert!(!glob_match("proj-*-login", "proj-auth-logout"));
+    }
+
+    #[test]
+    fn glob_star_only() {
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("*", ""));
+    }
 }

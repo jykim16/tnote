@@ -137,8 +137,8 @@ pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config
         .args([
             "display-popup",
             "-x", "R", "-y", "T",
-            "-w", &config.width.to_string(),
-            "-h", &config.height.to_string(),
+            "-w", &config.width,
+            "-h", &config.height,
             "-b", "rounded",
             "-T", &popup_title,
             "-E", &attach_cmd,

@@ -18,17 +18,27 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders};
 use ratatui::{Terminal, TerminalOptions, Viewport};
 
-fn make_rect(width: u16, height: u16) -> io::Result<(Rect, u16, u16)> {
+/// Parse a dimension string: "75%" → percentage of `total`; "80" → literal columns/lines.
+fn resolve_dim(s: &str, total: u16) -> u16 {
+    if let Some(pct) = s.strip_suffix('%') {
+        let p: u16 = pct.trim().parse().unwrap_or(100);
+        ((total as u32 * p as u32) / 100).min(total as u32) as u16
+    } else {
+        s.trim().parse::<u16>().unwrap_or(total).min(total)
+    }
+}
+
+fn make_rect(width: &str, height: &str) -> io::Result<(Rect, u16, u16)> {
     let (term_w, term_h) = terminal::size()?;
-    let popup_w = width.min(term_w);
-    let popup_h = height.min(term_h);
+    let popup_w = resolve_dim(width,  term_w);
+    let popup_h = resolve_dim(height, term_h);
     let rect = Rect::new(term_w.saturating_sub(popup_w), 0, popup_w, popup_h);
     let inner_w = popup_w.saturating_sub(2);
     let inner_h = popup_h.saturating_sub(2);
     Ok((rect, inner_w, inner_h))
 }
 
-pub fn run(file: &Path, label: &str, width: u16, height: u16) -> io::Result<()> {
+pub fn run(file: &Path, label: &str, width: &str, height: &str) -> io::Result<()> {
     // Initial sizing for the PTY (pre-alternate-screen).
     let (_, init_iw, init_ih) = make_rect(width, height)?;
 
