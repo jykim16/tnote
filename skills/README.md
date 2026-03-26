@@ -39,7 +39,20 @@ Then prepend the following frontmatter to tnote-summarize.md and tnote-plan.md:
 ---
 inclusion: manual
 ---
+
+Then read the root and worspace directory in .kiro/agents. If agent specs exist, add the following resources to the configurations:
+{
+  "resources": ["file://.kiro/steering/**/*.md"]
+}
 ```
+
+> **Custom agents:** Steering files are only auto-loaded by the default agent. If you use a custom agent, add the steering files to your agent's `resources` in `.kiro/agents/<agent>.json`:
+>
+> ```json
+> {
+>   "resources": ["file://.kiro/steering/**/*.md"]
+> }
+> ```
 
 ---
 

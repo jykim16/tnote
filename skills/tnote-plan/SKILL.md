@@ -54,9 +54,15 @@ Add a log entry:
 
 ## 4. Create notes for new workstreams
 
+**CRITICAL: Do NOT use `tnote name` when creating task notes as a planner.**
+
+Write directly to the tnote directory with `named-` prefix to avoid changing the session's pinned note:
+
 ```
-tnote name <project>-<domain>-<task>
-# write initial note to: $(tnote path --name <project>-<domain>-<task>)
+TNOTE_DIR=$(dirname $(tnote path --name $(tnote list | head -1 | awk '{print $1}')))
+cat > "$TNOTE_DIR/named-<project>-<domain>-<task>.md" << 'EOF'
+<note content>
+EOF
 ```
 
 Use Status `queued` and pre-populate the Queue. Match the project prefix of related agents.
