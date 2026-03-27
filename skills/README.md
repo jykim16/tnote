@@ -6,7 +6,7 @@ Three skills for agentic tnote use:
 |---|---|---|
 | `tnote-track` | auto + manual | Individual agent task tracking |
 | `tnote-summarize` | manual only | Summarize all agent notes across a cluster |
-| `tnote-plan` | manual only | Inject tasks into agent notes |
+| `tnote-manager` | manual only | Primary planning agent — priorities, status, and task delegation |
 
 ---
 
@@ -15,11 +15,11 @@ Three skills for agentic tnote use:
 ```
 Install the tnote agent skills into this project. Run these commands:
 
-mkdir -p .claude/skills/tnote-track .claude/skills/tnote-summarize .claude/skills/tnote-plan
+mkdir -p .claude/skills/tnote-track .claude/skills/tnote-summarize .claude/skills/tnote-manager
 
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-track/SKILL.md    -o .claude/skills/tnote-track/SKILL.md
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-summarize/SKILL.md -o .claude/skills/tnote-summarize/SKILL.md
-curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-plan/SKILL.md     -o .claude/skills/tnote-plan/SKILL.md
+curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md  -o .claude/skills/tnote-manager/SKILL.md
 ```
 
 ---
@@ -33,9 +33,9 @@ mkdir -p .kiro/steering
 
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-track/SKILL.md    -o .kiro/steering/tnote-track.md
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-summarize/SKILL.md -o .kiro/steering/tnote-summarize.md
-curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-plan/SKILL.md     -o .kiro/steering/tnote-plan.md
+curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md  -o .kiro/steering/tnote-manager.md
 
-Then prepend the following frontmatter to tnote-summarize.md and tnote-plan.md:
+Then prepend the following frontmatter to tnote-summarize.md and tnote-manager.md:
 ---
 inclusion: manual
 ---
@@ -61,11 +61,11 @@ Then read the root and worspace directory in .kiro/agents. If agent specs exist,
 ```
 Install the tnote agent skills into this project. Run these commands:
 
-mkdir -p .codex/skills/tnote-track .codex/skills/tnote-summarize/agents .codex/skills/tnote-plan/agents
+mkdir -p .codex/skills/tnote-track .codex/skills/tnote-summarize/agents .codex/skills/tnote-manager/agents
 
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-track/SKILL.md    -o .codex/skills/tnote-track/SKILL.md
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-summarize/SKILL.md -o .codex/skills/tnote-summarize/SKILL.md
-curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-plan/SKILL.md     -o .codex/skills/tnote-plan/SKILL.md
+curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md  -o .codex/skills/tnote-manager/SKILL.md
 
-printf 'policy:\n  allow_implicit_invocation: false\n' | tee .codex/skills/tnote-summarize/agents/openai.yaml .codex/skills/tnote-plan/agents/openai.yaml
+printf 'policy:\n  allow_implicit_invocation: false\n' | tee .codex/skills/tnote-summarize/agents/openai.yaml .codex/skills/tnote-manager/agents/openai.yaml
 ```

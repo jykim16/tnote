@@ -31,26 +31,39 @@ Write this structure to your note path:
 ## Domain: <project>-<domain>
 ## Started: <date>
 
-## Queue
-- [ ] <next task>
-
 ## In Progress
 - [ ] <current task>
 
+## Queue
+- [ ] <next task>
+
 ## Done
 - [x] <completed task>
+
+## Blocked
+- <blocker and what is needed>
+
+---
+
+## Context
+### Goal
+<what this agent was asked to accomplish>
+
+### Background
+<relevant context, decisions, dependencies — seeded by manager, extended by agent>
 
 ## Log
 ### <date>
 - <decisions, findings, actions>
 
-## Blocked
-- <blocker and what is needed>
-
 ## Handoff
 - <what the next agent or human needs to know>
 - <dependencies on other agents by name>
 ```
+
+The `---` separator divides the note into two zones:
+- **Status zone** (above `---`): In Progress / Queue / Done / Blocked — updated frequently, quick to scan
+- **Context zone** (below `---`): Goal, Background, Log, Handoff — detailed context for doing the work
 
 ## 3. Update discipline
 
