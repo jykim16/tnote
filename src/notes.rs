@@ -212,6 +212,40 @@ impl Notes {
         Ok(true)
     }
 
+    /// Remove the .link binding for a single window key.
+    /// Returns Ok(Some(name)) if a binding was removed, Ok(None) if none existed.
+    pub fn unbind_key(&self, key: &str) -> std::io::Result<Option<String>> {
+        let link = self.meta_dir().join(format!("{}.link", key));
+        if !link.exists() {
+            return Ok(None);
+        }
+        let name = fs::read_to_string(&link).unwrap_or_default().trim().to_string();
+        fs::remove_file(&link)?;
+        Ok(Some(name))
+    }
+
+    /// Remove all .link bindings pointing to a named note.
+    /// Returns the list of keys that were unbound.
+    pub fn unbind_named(&self, name: &str) -> std::io::Result<Vec<String>> {
+        let meta = self.meta_dir();
+        let mut unbound = Vec::new();
+        if let Ok(entries) = fs::read_dir(&meta) {
+            for entry in entries.flatten() {
+                if entry.path().extension().and_then(|s| s.to_str()) == Some("link") {
+                    if let Ok(target) = fs::read_to_string(entry.path()) {
+                        if target.trim() == name {
+                            let key = entry.file_name().to_string_lossy()
+                                .strip_suffix(".link").unwrap_or("").to_string();
+                            let _ = fs::remove_file(entry.path());
+                            unbound.push(key);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(unbound)
+    }
+
     /// Builds a reverse map: note name → list of keys that link to it.
     /// e.g. "api-server" → ["tmux-work+0", "shell-12345"]
     pub fn link_sources(&self) -> HashMap<String, Vec<String>> {

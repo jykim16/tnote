@@ -66,7 +66,14 @@ enum Cmd {
         dryrun: bool,
     },
     /// List all notes with line counts
+    #[command(alias = "ls")]
     List,
+    /// Remove the tmux window binding from a named note
+    Unbind {
+        /// Unbind all windows from a specific named note
+        #[arg(short = 'n', long)]
+        name: Option<String>,
+    },
     /// Print the note file path
     Path {
         /// Show path for a specific named note
@@ -106,6 +113,7 @@ fn main() {
         Some(Cmd::Show { name }) => cmd_show(&notes, name.as_deref()),
         Some(Cmd::Clean { all, name, dryrun }) => cmd_clean(&notes, all.clone(), name.as_deref(), *dryrun),
         Some(Cmd::List) => cmd_list(&notes),
+        Some(Cmd::Unbind { name }) => cmd_unbind(&notes, name.as_deref()),
         Some(Cmd::Path { name }) => cmd_path(&notes, name.as_deref()),
         Some(Cmd::Setup) => cmd_setup(&config),
         Some(Cmd::Uninstall) => install::uninstall(&config),
@@ -477,6 +485,40 @@ fn cmd_list(notes: &Notes) {
     }
 }
 
+fn cmd_unbind(notes: &Notes, name: Option<&str>) {
+    if let Some(n) = name {
+        match notes.unbind_named(n) {
+            Ok(keys) if keys.is_empty() => {
+                eprintln!("tnote unbind: no windows bound to '{}'", n);
+                std::process::exit(1);
+            }
+            Ok(keys) => {
+                for key in &keys {
+                    println!("tnote unbind: unbound {} from '{}'", key, n);
+                }
+            }
+            Err(e) => {
+                eprintln!("tnote unbind: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    let (key, _) = current_note(notes);
+    match notes.unbind_key(&key) {
+        Ok(Some(name)) => println!("tnote unbind: unbound '{}' from this window", name),
+        Ok(None) => {
+            eprintln!("tnote unbind: this window has no named binding");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("tnote unbind: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
 fn cmd_path(notes: &Notes, name: Option<&str>) {
     if let Some(n) = name {
         let file = notes.dir.join(format!("named-{}.md", n));
@@ -573,7 +615,9 @@ USAGE:
   tnote show                       Print note contents inline
   tnote show --name 'proj-*'       Print all notes matching a pattern (quote the glob)
   tnote clean [--dryrun]           Remove orphaned notes and popup sessions
-  tnote list                       List all notes with line counts
+  tnote list / ls                  List all notes with line counts
+  tnote unbind                     Remove this window's binding to a named note
+  tnote unbind --name <name>       Remove all window bindings to a named note
   tnote path                       Print the note file path
   tnote setup                      Configure and install keybindings
   tnote uninstall                  Remove tmux and shell keybindings
@@ -586,7 +630,9 @@ TMUX COMMAND LINE (works while a process is running):
     tnote-show         Print note contents
     tnote-clean        Remove orphaned notes
     tnote-list         List all notes
+    tnote-ls           List all notes (alias)
     tnote-path         Print the note file path
+    tnote-unbind       Remove this window's binding to a named note
     tnote-help         Show this help
   Requires 'tnote setup' to install the ':tnote' command aliases.
 

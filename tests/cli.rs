@@ -478,3 +478,35 @@ fn show_name_glob_mid_pattern() {
     assert!(stdout.contains("api login"));
     assert!(!stdout.contains("auth logout"));
 }
+
+#[test]
+fn ls_is_alias_for_list() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-foo.md"), "content\n").unwrap();
+    let out_list = tnote(dir.path()).args(["list"]).output().unwrap();
+    let out_ls   = tnote(dir.path()).args(["ls"]).output().unwrap();
+    assert!(out_ls.status.success());
+    assert_eq!(out_list.stdout, out_ls.stdout);
+}
+
+#[test]
+fn unbind_name_removes_link_files() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("meta")).unwrap();
+    fs::write(dir.path().join("named-myproj.md"), "data\n").unwrap();
+    fs::write(dir.path().join("meta").join("tmux-work+0.link"), "myproj").unwrap();
+    fs::write(dir.path().join("meta").join("tmux-work+1.link"), "myproj").unwrap();
+    assert!(exit_ok(&mut tnote(dir.path()).args(["unbind", "--name", "myproj"])));
+    assert!(!dir.path().join("meta").join("tmux-work+0.link").exists());
+    assert!(!dir.path().join("meta").join("tmux-work+1.link").exists());
+    // named note itself is untouched
+    assert!(dir.path().join("named-myproj.md").exists());
+}
+
+#[test]
+fn unbind_name_not_bound_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-myproj.md"), "data\n").unwrap();
+    let status = tnote(dir.path()).args(["unbind", "--name", "myproj"]).output().unwrap().status;
+    assert!(!status.success());
+}

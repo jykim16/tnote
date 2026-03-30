@@ -185,7 +185,9 @@ pub fn run(config: &Config) {
              set -s command-alias[103] \"tnote-path=run-shell 'tnote path'\"\n\
              set -s command-alias[104] \"tnote-clean=run-shell 'tnote clean'\"\n\
              set -s command-alias[105] \"tnote-help=run-shell 'tnote help'\"\n\
-             set -s command-alias[106] \"tnote-name=run-shell 'tnote name'\"\n",
+             set -s command-alias[106] \"tnote-name=run-shell 'tnote name'\"\n\
+             set -s command-alias[107] \"tnote-ls=run-shell 'tnote ls'\"\n\
+             set -s command-alias[108] \"tnote-unbind=run-shell 'tnote unbind'\"\n",
             key = key,
         );
 
@@ -246,7 +248,9 @@ pub fn uninstall(config: &Config) {
          set -su command-alias[103]\n\
          set -su command-alias[104]\n\
          set -su command-alias[105]\n\
-         set -su command-alias[106]\n",
+         set -su command-alias[106]\n\
+         set -su command-alias[107]\n\
+         set -su command-alias[108]\n",
         key = key
     );
 
