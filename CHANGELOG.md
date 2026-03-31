@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.5
+
+- Mark newly published non-prerelease GitHub releases as latest in a dedicated workflow
+- Keep the cargo-dist generated release workflow unmodified so tagged releases can publish successfully
+
 ## 0.3.0
 
 - Shell keybindings: `tnote setup` now installs `Ctrl+t` in zsh, bash, and fish (auto-disabled inside tmux)

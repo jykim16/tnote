@@ -1,0 +1,19 @@
+name: Mark Latest Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  mark-latest:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Mark release as latest
+        run: gh release edit "$TAG" --latest
