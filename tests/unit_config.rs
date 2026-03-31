@@ -82,6 +82,7 @@ fn test_save_writes_correct_format() {
         key:    "n".into(),
         width:  "100".into(),
         height: "30".into(),
+        ls_annotation: None,
     };
     cfg.save().unwrap();
     let content = std::fs::read_to_string(dir.path().join("meta").join("config")).unwrap();
@@ -101,6 +102,7 @@ fn test_save_round_trip() {
         key:    "u".into(),
         width:  "50".into(),
         height: "15".into(),
+        ls_annotation: None,
     };
     cfg.save().unwrap();
 

@@ -7,6 +7,7 @@ pub struct Config {
     pub height: String,
     pub key: String,
     pub editor: String,
+    pub ls_annotation: Option<String>,
 }
 
 impl Config {
@@ -41,24 +42,30 @@ impl Config {
 
         let file = read_config_file(&dir.join("meta").join("config"));
 
+        let ls_annotation = std::env::var("TNOTE_LS_ANNOTATION").ok()
+            .or_else(|| file.get("ls_annotation").cloned())
+            .filter(|s| !s.is_empty());
+
         Config {
             width:  parse_str("TNOTE_WIDTH",  file.get("width").map(String::as_str),  "100%"),
             height: parse_str("TNOTE_HEIGHT", file.get("height").map(String::as_str), "50%"),
             key:    parse_str("TNOTE_KEY",    file.get("key").map(String::as_str),    "t"),
             editor: parse_str("EDITOR",       file.get("editor").map(String::as_str), "vim"),
+            ls_annotation,
             dir,
         }
     }
 
     pub fn save(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(self.dir.join("meta"))?;
-        std::fs::write(
-            self.dir.join("meta").join("config"),
-            format!(
-                "editor={}\nkey={}\nwidth={}\nheight={}\n",
-                self.editor, self.key, self.width, self.height
-            ),
-        )
+        let mut content = format!(
+            "editor={}\nkey={}\nwidth={}\nheight={}\n",
+            self.editor, self.key, self.width, self.height
+        );
+        if let Some(ref cmd) = self.ls_annotation {
+            content.push_str(&format!("ls_annotation={}\n", cmd));
+        }
+        std::fs::write(self.dir.join("meta").join("config"), content)
     }
 }
 
@@ -148,6 +155,7 @@ mod tests {
             key:    "n".to_string(),
             width:  "100".to_string(),
             height: "30".to_string(),
+            ls_annotation: None,
         };
         cfg.save().unwrap();
         let content = std::fs::read_to_string(tmp.path().join("meta/config")).unwrap();
@@ -166,6 +174,7 @@ mod tests {
             key:    "g".to_string(),
             width:  "70".to_string(),
             height: "25".to_string(),
+            ls_annotation: None,
         };
         cfg.save().unwrap();
         let map = read_config_file(&tmp.path().join("meta/config"));

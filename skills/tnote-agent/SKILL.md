@@ -9,12 +9,22 @@ You are an agent that uses tnote to maintain a living record of your work. Follo
 
 Before you run any `tnote` command:
 
-- Check whether this is the relevant tnote skill for the user's request.
+- Check whether this is the relevant tnote skill for the request.
 - If another tnote skill is more appropriate, say so and switch to that skill instead of proceeding here.
 - If the user's concrete task is still unclear, ask what they want to accomplish before setting up a note.
 - Only continue once the task is specific enough to name and track.
 
 ## 2. Claim your note
+
+First, scan existing notes to check for a relevant one you should resume instead of creating a new one:
+
+```
+tnote ls
+```
+
+Look for a note whose name matches the current project-domain. If one exists and is relevant, run `tnote name <note-name>` to attach to the session, then `tnote show --name <note-name>` to read the current state (the header includes the file path) — skip to step 4.
+
+Only proceed to create a new note if no relevant existing note is found.
 
 Choose a name using `<project>-<domain>-<task>`:
 - **project**: top-level product or repo (`myapp`, `infra`, `tnote`)
@@ -27,12 +37,11 @@ Agents on the same workstream should share a project-domain prefix so summaries 
 
 ```
 tnote name <project>-<domain>-<task>
-NOTE_PATH=$(tnote path --name <project>-<domain>-<task>)
 ```
 
-## 3. Note format
+## 3. Write the initial note
 
-Write this structure to your note path:
+After `tnote name`, the file exists but is empty. Get the path and write directly to it — no need to read first. Seed the Background section with context you already know from the conversation: relevant files, constraints, decisions, and dependencies.
 
 ```markdown
 ## Status: in-progress
@@ -40,16 +49,14 @@ Write this structure to your note path:
 ## Started: <date>
 
 ## In Progress
-- [ ] <current task>
+- [ ] <first task>
 
 ## Queue
 - [ ] <next task>
 
 ## Blocked
-- <blocker and what is needed>
 
 ## Done
-- [x] <completed task>
 
 ---
 
@@ -58,34 +65,46 @@ Write this structure to your note path:
 <what this agent was asked to accomplish>
 
 ### Background
-<relevant context, decisions, dependencies — seeded by manager, extended by agent>
+<what you already know: relevant files, tech, constraints, decisions, dependencies>
 
 ---
 
 ## Log
 ### <date>
-- <decisions, findings, actions>
-
+- Started work on <goal>
 ```
 
 The `---` separator divides the note into three zones:
 - **Status zone** (above first `---`): In Progress / Queue / Done / Blocked — updated frequently, quick to scan
 - **Context zone**: Goal / Background — detailed context for doing the work
-- **Context zone** (below last `---`): Log — Daily notes of work accomplished
+- **Log zone** (below second `---`): Dated entries for decisions, findings, and actions
+
+After writing the note, briefly tell the user the plan (tasks in order) before starting work.
 
 ## 4. Update discipline
 
-- **Starting a task**: move subtask from Queue → In Progress
-- **Finishing a subtask**: move subtask to Done and add log entry. If there are no more tasks ask if the overall task is complete.
-- **Blocked**: move subtask to Blocked, set Status to `blocked`
-- **Finishing a task**: move In Progress → Done, add log entry
+Update your note as work progresses — not just at the end.
 
-To update your note, read it first then make targeted edits to the file — do not rewrite the whole file:
+**Task transitions:**
+- **Starting a subtask**: move it from Queue → In Progress
+- **Finishing a subtask**: move it to Done, add a log entry
+- **Blocked**: move the subtask to Blocked, set `Status: blocked`
+- **All tasks done**: confirm with the user before closing
+
+**Context updates** — update Background when you discover:
+- Key files, functions, or modules relevant to the work
+- Architectural decisions or constraints
+- Gotchas, non-obvious behavior, or failed approaches
+
+**Log entries** — add a dated entry when you:
+- Make a significant decision or tradeoff
+- Discover something that changes the approach
+- Complete a meaningful chunk of work
+- Hit and resolve a blocker
+
+To update your note, read the current state first, then make targeted edits — do not rewrite the whole file:
 
 ```
-# Read current note
 tnote show --name <your-note-name>
-
-# Get the file path, then edit only the lines that changed
-tnote path --name <your-note-name>
+# the header shows the file path — use Edit tool on specific lines that changed
 ```

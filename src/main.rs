@@ -112,7 +112,7 @@ fn main() {
         Some(Cmd::Name { name }) => cmd_name(&notes, name.as_deref()),
         Some(Cmd::Show { name }) => cmd_show(&notes, name.as_deref()),
         Some(Cmd::Clean { all, name, dryrun }) => cmd_clean(&notes, all.clone(), name.as_deref(), *dryrun),
-        Some(Cmd::List) => cmd_list(&notes),
+        Some(Cmd::List) => cmd_list(&notes, &config),
         Some(Cmd::Unbind { name }) => cmd_unbind(&notes, name.as_deref()),
         Some(Cmd::Path { name }) => cmd_path(&notes, name.as_deref()),
         Some(Cmd::Setup) => cmd_setup(&config),
@@ -255,7 +255,7 @@ fn show_named_note(notes: &Notes, n: &str) {
         std::process::exit(1);
     }
     if file.metadata().map(|m| m.len() > 0).unwrap_or(false) {
-        println!("{}", format!("── tnote: {} ──", n).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
+        println!("{}", format!("── {}: {} ──", n, file.display()).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
         match fs::read_to_string(&file) {
             Ok(content) => print!("{}", content),
             Err(e) => eprintln!("tnote show: {}", e.if_supports_color(Stderr, |t| t.red())),
@@ -332,7 +332,7 @@ fn cmd_show(notes: &Notes, name: Option<&str>) {
     for (_, label, file) in &resolved {
         let non_empty = file.exists() && file.metadata().map(|m| m.len() > 0).unwrap_or(false);
         if non_empty {
-            println!("{}", format!("── tnote: {} ──", label).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
+            println!("{}", format!("── {}: {} ──", label, file.display()).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
             match fs::read_to_string(file) {
                 Ok(content) => print!("{}", content),
                 Err(e) => eprintln!("tnote show: {}", e.if_supports_color(Stderr, |t| t.red())),
@@ -395,7 +395,21 @@ fn cmd_clean(notes: &Notes, scope: Option<ClearScope>, named: Option<&str>, dry_
     }
 }
 
-fn cmd_list(notes: &Notes) {
+fn run_annotation_cmd(cmd_template: &str, path: &std::path::Path) -> String {
+    let cmd = cmd_template.replace("{}", &path.display().to_string());
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&cmd)
+        .output();
+    match output {
+        Ok(o) if o.status.success() => {
+            String::from_utf8_lossy(&o.stdout).trim_end_matches('\n').to_string()
+        }
+        _ => String::new(),
+    }
+}
+
+fn cmd_list(notes: &Notes, config: &Config) {
     let (_, current_file) = current_note(notes);
     match notes.list_notes() {
         Ok(list) => {
@@ -408,7 +422,7 @@ fn cmd_list(notes: &Notes) {
                 category:      String,
                 plain_label:   String,
                 colored_label: String,
-                lines:         usize,
+                annotation:    String,
                 marker:        String,
                 sources:       Vec<String>,
             }
@@ -440,18 +454,23 @@ fn cmd_list(notes: &Notes) {
                 } else {
                     String::new()
                 };
+                let annotation = if let Some(ref cmd) = config.ls_annotation {
+                    run_annotation_cmd(cmd, path)
+                } else {
+                    format!("{} lines", lines)
+                };
                 Row {
                     category:      cat.clone(),
                     plain_label:   shown,
                     colored_label: colored_name,
-                    lines:         *lines,
+                    annotation,
                     marker,
                     sources,
                 }
             }).collect();
 
-            let max_width   = rows.iter().map(|r| r.plain_label.len()).max().unwrap_or(0);
-            let lines_width = rows.iter().map(|r| r.lines).max().unwrap_or(0).to_string().len();
+            let max_width        = rows.iter().map(|r| r.plain_label.len()).max().unwrap_or(0);
+            let annotation_width = rows.iter().map(|r| r.annotation.len()).max().unwrap_or(0);
 
             let categories = [
                 ("named", "named"),
@@ -465,12 +484,12 @@ fn cmd_list(notes: &Notes) {
                 println!("{}", format!("{}:", cat_label).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
                 for row in cat_rows {
                     let padding = max_width - row.plain_label.len();
-                    println!("  {}{}  {:>width$} lines{}",
+                    println!("  {}{}  {:width$}{}",
                         row.colored_label,
                         " ".repeat(padding),
-                        row.lines,
+                        row.annotation,
                         row.marker,
-                        width = lines_width,
+                        width = annotation_width,
                     );
                     for source in &row.sources {
                         println!("    {} {}", "↳".if_supports_color(Stdout, |t| t.dimmed()), source.if_supports_color(Stdout, |t| t.dimmed()));
@@ -536,10 +555,13 @@ fn cmd_path(notes: &Notes, name: Option<&str>) {
 fn cmd_setup(config: &Config) {
     println!("tnote setup\n");
 
-    let editor = prompt_editor(&config.editor);
-    let key    = prompt("Key (tmux: prefix+?, shell: Ctrl+?)", &config.key);
-    let width  = prompt("Popup width  (e.g. 100%, 80)", &config.width);
-    let height = prompt("Popup height (e.g. 50%, 22)",  &config.height);
+    let editor        = prompt_editor(&config.editor);
+    let key           = prompt("Key (tmux: prefix+?, shell: Ctrl+?)", &config.key);
+    let width         = prompt("Popup width  (e.g. 100%, 80)", &config.width);
+    let height        = prompt("Popup height (e.g. 50%, 22)",  &config.height);
+    let annotation_default = config.ls_annotation.as_deref().unwrap_or("");
+    let annotation_raw = prompt("ls annotation (e.g. head -1 {})", annotation_default);
+    let ls_annotation = if annotation_raw.is_empty() { None } else { Some(annotation_raw) };
 
     let new_config = Config {
         dir:    config.dir.clone(),
@@ -547,6 +569,7 @@ fn cmd_setup(config: &Config) {
         key,
         width,
         height,
+        ls_annotation,
     };
 
     if let Err(e) = new_config.save() {
@@ -650,7 +673,11 @@ ENVIRONMENT (configurable via 'tnote setup'):
   TNOTE_DIR              Note storage directory  (default: ~/.tnote)
   TNOTE_KEY              Key binding             (default: t, tmux: prefix+t, shell: Ctrl+t)
   TNOTE_WIDTH            Popup width  (default: 100%, e.g. 80 or 75%)
-  TNOTE_HEIGHT           Popup height (default: 50%,  e.g. 22 or 40%)"
+  TNOTE_HEIGHT           Popup height (default: 50%,  e.g. 22 or 40%)
+  TNOTE_LS_ANNOTATION    Shell command shown next to each note in 'tnote ls'.
+                         Use {{}} as the note file path placeholder.
+                         Default: line count.
+                         Example: ls_annotation=head -1 {{}} (show first line)"
     );
 }
 

@@ -2,9 +2,11 @@
 
 ## Validation
 
-Always run `cargo install --path .` before validating any behavior. Do not test with `cargo run` or assume `cargo build` is sufficient — the installed binary in `~/.cargo/bin/tnote` is what matters.
+Always run `cargo install --path .` before validating any behavior. Do not test with `cargo run` or assume `cargo build` is sufficient.
 
-After making any code changes, always run `cargo install --path .` so the user can immediately test the changes locally with the installed binary.
+`tnote` in PATH resolves to the Homebrew release binary. To test dev changes, always use the full path: `/Users/jonkimj/.cargo/bin/tnote`.
+
+After making any code changes, always run `cargo install --path .` so the user can immediately test the changes locally with the dev binary.
 
 ## Logging
 
