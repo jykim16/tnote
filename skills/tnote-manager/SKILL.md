@@ -112,7 +112,7 @@ Get the path and write the full note there (it's a new file):
 tnote path --name <project>-<domain>-<task>
 ```
 
-Use the note format from the `tnote-track` skill. Set Status to `queued` and pre-populate Queue and Context > Goal + Background with everything the agent needs to do its job, including clarifying dependencies on other agents or operators.
+Use the note format from the `tnote-agent` skill. Set Status to `queued` and pre-populate Queue and Context > Goal + Background with everything the agent needs to do its job, including clarifying dependencies on other agents or operators.
 
 ---
 

@@ -1,4 +1,4 @@
 release/*
 target/*
 tarpaulin-report.json
-.claude/
+.claude/settings.local.json

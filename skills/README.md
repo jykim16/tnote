@@ -4,7 +4,7 @@ Two skills for agentic tnote use:
 
 | Skill | Invocation | Purpose |
 |---|---|---|
-| `tnote-track` | auto + manual | Individual agent task tracking |
+| `tnote-agent` | auto + manual | Individual agent task tracking |
 | `tnote-manager` | manual only | Primary planning agent — priorities, status, and task delegation |
 
 ---
@@ -14,9 +14,9 @@ Two skills for agentic tnote use:
 ```
 Install the tnote agent skills into this project. Run these commands:
 
-mkdir -p .claude/skills/tnote-track .claude/skills/tnote-manager
+mkdir -p .claude/skills/tnote-agent .claude/skills/tnote-manager
 
-curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-track/SKILL.md   -o .claude/skills/tnote-track/SKILL.md
+curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-agent/SKILL.md   -o .claude/skills/tnote-agent/SKILL.md
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md -o .claude/skills/tnote-manager/SKILL.md
 ```
 
@@ -24,7 +24,7 @@ curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manag
 
 | Skill | Additional fields |
 |---|---|
-| `tnote-track` | `allowed-tools: Bash(tnote *)` |
+| `tnote-agent` | `allowed-tools: Bash(tnote *)` |
 | `tnote-manager` | `argument-hint: [project-name]`, `allowed-tools: Bash(tnote *)` |
 
 ---
@@ -36,7 +36,7 @@ Install the tnote agent skills into this project as Kiro steering files. Run the
 
 mkdir -p .kiro/steering
 
-curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-track/SKILL.md   -o .kiro/steering/tnote-track.md
+curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-agent/SKILL.md   -o .kiro/steering/tnote-agent.md
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md -o .kiro/steering/tnote-manager.md
 
 Then prepend the following frontmatter to tnote-manager.md:
@@ -65,9 +65,9 @@ Then read the root and worspace directory in .kiro/agents. If agent specs exist,
 ```
 Install the tnote agent skills into this project. Run these commands:
 
-mkdir -p .codex/skills/tnote-track .codex/skills/tnote-manager/agents
+mkdir -p .codex/skills/tnote-agent .codex/skills/tnote-manager/agents
 
-curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-track/SKILL.md   -o .codex/skills/tnote-track/SKILL.md
+curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-agent/SKILL.md   -o .codex/skills/tnote-agent/SKILL.md
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md -o .codex/skills/tnote-manager/SKILL.md
 
 printf 'policy:\n  allow_implicit_invocation: false\n' > .codex/skills/tnote-manager/agents/openai.yaml

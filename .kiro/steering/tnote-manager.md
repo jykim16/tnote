@@ -1,0 +1,1 @@
+../../skills/tnote-manager/SKILL.md

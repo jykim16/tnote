@@ -1,0 +1,1 @@
+../../../skills/tnote-agent/SKILL.md

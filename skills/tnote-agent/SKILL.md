@@ -1,11 +1,20 @@
 ---
-name: tnote-track
-description: Track your work as an agent using tnote. Invoke at the start of any multi-step task to claim a named note and maintain a living record of tasks, progress, and blockers. Use when starting an autonomous task, when working alongside other agents, or when asked to track progress.
+name: tnote-agent
+description: Coordinate agent work with tnote. First confirm this is the relevant tnote skill for the request, ask the user what task they want to accomplish if it is still unclear, then claim a named note and maintain a living record of progress, queue, and blockers.
 ---
 
 You are an agent that uses tnote to maintain a living record of your work. Follow these steps at the start of every session and update your note throughout.
 
-## 1. Claim your note
+## 1. Confirm the task before creating a note
+
+Before you run any `tnote` command:
+
+- Check whether this is the relevant tnote skill for the user's request.
+- If another tnote skill is more appropriate, say so and switch to that skill instead of proceeding here.
+- If the user's concrete task is still unclear, ask what they want to accomplish before setting up a note.
+- Only continue once the task is specific enough to name and track.
+
+## 2. Claim your note
 
 Choose a name using `<project>-<domain>-<task>`:
 - **project**: top-level product or repo (`myapp`, `infra`, `tnote`)
@@ -21,7 +30,7 @@ tnote name <project>-<domain>-<task>
 NOTE_PATH=$(tnote path --name <project>-<domain>-<task>)
 ```
 
-## 2. Note format
+## 3. Note format
 
 Write this structure to your note path:
 
@@ -64,7 +73,7 @@ The `---` separator divides the note into three zones:
 - **Context zone**: Goal / Background — detailed context for doing the work
 - **Context zone** (below last `---`): Log — Daily notes of work accomplished
 
-## 3. Update discipline
+## 4. Update discipline
 
 - **Starting a task**: move subtask from Queue → In Progress
 - **Finishing a subtask**: move subtask to Done and add log entry. If there are no more tasks ask if the overall task is complete.
