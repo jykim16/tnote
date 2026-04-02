@@ -11,20 +11,21 @@ Two skills for agentic tnote use:
 
 ## Claude Code
 
+`tnote-agent` has a Claude Code-specific variant (`SKILL-claude.md`) that delegates all tnote writes to a forked sub-agent via the `Agent` tool. This keeps note content out of the main context window — the sub-agent handles file I/O and returns only a brief summary. Kiro and Codex use the generic `SKILL.md` since neither supports session-level sub-agent spawning.
+
 ```
 Install the tnote agent skills into this project. Run these commands:
 
 mkdir -p .claude/skills/tnote-agent .claude/skills/tnote-manager
 
-curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-agent/SKILL.md   -o .claude/skills/tnote-agent/SKILL.md
-curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md -o .claude/skills/tnote-manager/SKILL.md
+curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-agent/SKILL-claude.md -o .claude/skills/tnote-agent/SKILL.md
+curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md      -o .claude/skills/tnote-manager/SKILL.md
 ```
 
-**Claude Code-specific frontmatter fields** — add these to each skill's frontmatter after installing:
+**Claude Code-specific frontmatter fields** — add these to `tnote-manager`'s frontmatter after installing (`tnote-agent` already includes them in `SKILL-claude.md`):
 
 | Skill | Additional fields |
 |---|---|
-| `tnote-agent` | `allowed-tools: Bash(tnote *)` |
 | `tnote-manager` | `argument-hint: [project-name]`, `allowed-tools: Bash(tnote *)` |
 
 ---

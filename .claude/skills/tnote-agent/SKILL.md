@@ -1,1 +1,1 @@
-../../../skills/tnote-agent/SKILL.md
+../../../skills/tnote-agent/SKILL-claude.md
