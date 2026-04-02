@@ -1,8 +1,12 @@
 # Changelog
 
+## 0.3.6
+
+- Add archiving and unarchiving for named notes
+- Clean up release automation and refresh install and agent-skill docs
+
 ## 0.3.5
 
-- Mark newly published non-prerelease GitHub releases as latest in a dedicated workflow
 - Keep the cargo-dist generated release workflow unmodified so tagged releases can publish successfully
 
 ## 0.3.0

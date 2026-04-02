@@ -29,16 +29,16 @@ Since tnotes are just markdown files, my agents use tnote too. I tell it to log 
 
 ## Install
 
-### Homebrew (macOS)
-
-```sh
-brew install jykim16/tap/tnote
-```
-
 ### From a release (macOS and Linux)
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jykim16/tnote/releases/latest/download/tnote-installer.sh | sh
+```
+
+### Homebrew (macOS)
+
+```sh
+brew install jykim16/tap/tnote
 ```
 
 ### From source

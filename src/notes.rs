@@ -186,6 +186,52 @@ impl Notes {
         Ok(removed)
     }
 
+    /// Archive directory: `<notes_dir>/archive/`
+    pub fn archive_dir(&self) -> PathBuf {
+        self.dir.join("archive")
+    }
+
+    /// Move a named note to the archive directory.
+    /// Returns Ok(true) if the note existed, Ok(false) if not found.
+    pub fn archive_named(&self, name: &str, dry_run: bool) -> io::Result<bool> {
+        let note_file = self.dir.join(format!("named-{}.md", name));
+        if !note_file.exists() {
+            return Ok(false);
+        }
+        if !dry_run {
+            let archive = self.archive_dir();
+            fs::create_dir_all(&archive)?;
+            fs::rename(&note_file, archive.join(format!("named-{}.md", name)))?;
+            // Remove any .link files pointing to this name
+            let meta = self.meta_dir();
+            if let Ok(entries) = fs::read_dir(&meta) {
+                for entry in entries.flatten() {
+                    if entry.path().extension().and_then(|s| s.to_str()) == Some("link") {
+                        if let Ok(target) = fs::read_to_string(entry.path()) {
+                            if target.trim() == name {
+                                let _ = fs::remove_file(entry.path());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    /// Restore a named note from the archive directory.
+    /// Returns Ok(true) if the archived note existed, Ok(false) if not found.
+    pub fn unarchive_named(&self, name: &str, dry_run: bool) -> io::Result<bool> {
+        let archived = self.archive_dir().join(format!("named-{}.md", name));
+        if !archived.exists() {
+            return Ok(false);
+        }
+        if !dry_run {
+            fs::rename(&archived, self.dir.join(format!("named-{}.md", name)))?;
+        }
+        Ok(true)
+    }
+
     /// Remove a named note and any .link files pointing to it.
     /// Returns Ok(true) if the note existed, Ok(false) if not found.
     pub fn remove_named(&self, name: &str, dry_run: bool) -> std::io::Result<bool> {

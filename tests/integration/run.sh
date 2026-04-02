@@ -51,6 +51,44 @@ tnote clean --dryrun | grep -q "would remove" && pass "clean --dryrun" || fail "
 tnote clean | grep -q "removed" && pass "clean" || fail "clean"
 [ ! -f "$TNOTE_DIR/shell-9999999.md" ] && pass "clean removes file" || fail "clean removes file"
 
+# clean --name --archive --dryrun
+tnote name archivetest
+echo "archive me" > "$TNOTE_DIR/named-archivetest.md"
+tnote clean --name archivetest --archive --dryrun | grep -q "would archive" && pass "archive --dryrun message" || fail "archive --dryrun message"
+[ -f "$TNOTE_DIR/named-archivetest.md" ] && pass "archive --dryrun keeps file" || fail "archive --dryrun keeps file"
+
+# clean --name --archive
+tnote clean --name archivetest --archive | grep -q "archived" && pass "archive message" || fail "archive message"
+[ ! -f "$TNOTE_DIR/named-archivetest.md" ] && pass "archive removes original" || fail "archive removes original"
+[ -f "$TNOTE_DIR/archive/named-archivetest.md" ] && pass "archive creates archive file" || fail "archive creates archive file"
+grep -q "archive me" "$TNOTE_DIR/archive/named-archivetest.md" && pass "archive preserves content" || fail "archive preserves content"
+
+# clean --name --archive (nonexistent)
+! tnote clean --name ghost --archive 2>/dev/null && pass "archive nonexistent exits nonzero" || fail "archive nonexistent exits nonzero"
+
+# clean --name --unarchive --dryrun
+tnote clean --name archivetest --unarchive --dryrun | grep -q "would unarchive" && pass "unarchive --dryrun message" || fail "unarchive --dryrun message"
+[ -f "$TNOTE_DIR/archive/named-archivetest.md" ] && pass "unarchive --dryrun keeps archived file" || fail "unarchive --dryrun keeps archived file"
+
+# clean --name --unarchive
+tnote clean --name archivetest --unarchive | grep -q "unarchived" && pass "unarchive message" || fail "unarchive message"
+[ -f "$TNOTE_DIR/named-archivetest.md" ] && pass "unarchive restores file" || fail "unarchive restores file"
+[ ! -f "$TNOTE_DIR/archive/named-archivetest.md" ] && pass "unarchive removes from archive" || fail "unarchive removes from archive"
+grep -q "archive me" "$TNOTE_DIR/named-archivetest.md" && pass "unarchive preserves content" || fail "unarchive preserves content"
+
+# clean --name --unarchive (nonexistent)
+! tnote clean --name ghost --unarchive 2>/dev/null && pass "unarchive nonexistent exits nonzero" || fail "unarchive nonexistent exits nonzero"
+
+# list --archive (empty)
+rm -rf "$TNOTE_DIR/archive"
+tnote list --archive | grep -q "no archived notes" && pass "list --archive (empty)" || fail "list --archive (empty)"
+
+# list --archive (with content)
+mkdir -p "$TNOTE_DIR/archive"
+echo "old stuff" > "$TNOTE_DIR/archive/named-oldproject.md"
+tnote list --archive | grep -q "oldproject" && pass "list --archive (content)" || fail "list --archive (content)"
+rm -rf "$TNOTE_DIR/archive"
+
 # completions
 tnote completions bash | grep -q "complete" && pass "completions bash" || fail "completions bash"
 tnote completions zsh | grep -q "compdef" && pass "completions zsh" || fail "completions zsh"

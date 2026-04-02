@@ -137,3 +137,47 @@ Add a Log entry in the agent note:
 ```
 
 Then update the manager note's Log and Agent Roster.
+
+---
+
+## 8. Cleanup and archiving
+
+When a priority is fully done and confirmed by the user, clean up the agent note so it stops appearing in `tnote ls` but remains retrievable:
+
+```
+tnote clean --name <agent-name> --archive
+```
+
+This moves the note to `~/.tnote/archive/` where it won't show in `tnote ls` or `tnote show` but can be read directly if needed later:
+
+```
+cat ~/.tnote/archive/named-<agent-name>.md
+```
+
+To restore an archived note:
+
+```
+tnote clean --name <agent-name> --unarchive
+```
+
+To list all archived notes:
+
+```
+tnote list --archive
+```
+
+If the agent had tmux windows attached, unbind and optionally kill them before archiving:
+
+```
+tnote unbind --name <agent-name>
+tmux kill-window -t <session>:<window>   # if the window is no longer needed
+```
+
+After archiving, remove the agent from the `Agent Roster` table and add a Log entry:
+
+```markdown
+### <date>
+- P<n> (<task>): archived agent `<agent-name>`
+```
+
+Run `tnote clean` (without `--name`) periodically to remove orphaned tmux and shell notes that are no longer tied to a live process or window.

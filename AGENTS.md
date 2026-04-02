@@ -17,3 +17,10 @@ Log messages should be prefixed with `tnote <command>:` where `<command>` is the
 
 Use `tnote:` as the prefix only for startup-level errors (before any subcommand runs).
 
+## Integration Tests
+
+Any feature that is validated end-to-end (e.g. manually tested via CLI commands) should have a corresponding test in `tests/integration/run.sh`. Integration tests run in Docker with a real tmux server — build and run with:
+
+```
+docker build -f tests/integration/Dockerfile -t tnote-test . && docker run --rm tnote-test
+```

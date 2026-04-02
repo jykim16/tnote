@@ -61,13 +61,23 @@ enum Cmd {
         /// Remove a specific named note by name
         #[arg(short = 'n', long, value_name = "NAME")]
         name: Option<String>,
+        /// Move to archive instead of deleting
+        #[arg(long)]
+        archive: bool,
+        /// Restore from archive
+        #[arg(long)]
+        unarchive: bool,
         /// Print what would be removed without removing anything
         #[arg(long)]
         dryrun: bool,
     },
     /// List all notes with line counts
     #[command(alias = "ls")]
-    List,
+    List {
+        /// List archived notes instead
+        #[arg(long)]
+        archive: bool,
+    },
     /// Remove the tmux window binding from a named note
     Unbind {
         /// Unbind all windows from a specific named note
@@ -111,8 +121,14 @@ fn main() {
         None => cmd_open(&config, &notes, cli.name.as_deref()),
         Some(Cmd::Name { name }) => cmd_name(&notes, name.as_deref()),
         Some(Cmd::Show { name }) => cmd_show(&notes, name.as_deref()),
-        Some(Cmd::Clean { all, name, dryrun }) => cmd_clean(&notes, all.clone(), name.as_deref(), *dryrun),
-        Some(Cmd::List) => cmd_list(&notes, &config),
+        Some(Cmd::Clean { all, name, archive, unarchive, dryrun }) => cmd_clean(&notes, all.clone(), name.as_deref(), *archive, *unarchive, *dryrun),
+        Some(Cmd::List { archive }) => {
+            if *archive {
+                cmd_list_archive(&notes);
+            } else {
+                cmd_list(&notes, &config);
+            }
+        }
         Some(Cmd::Unbind { name }) => cmd_unbind(&notes, name.as_deref()),
         Some(Cmd::Path { name }) => cmd_path(&notes, name.as_deref()),
         Some(Cmd::Setup) => cmd_setup(&config),
@@ -346,13 +362,22 @@ fn cmd_show(notes: &Notes, name: Option<&str>) {
     println!("tnote show: (empty) [{}]", label.if_supports_color(Stdout, |t| t.dimmed()));
 }
 
-fn cmd_clean(notes: &Notes, scope: Option<ClearScope>, named: Option<&str>, dry_run: bool) {
+fn cmd_clean(notes: &Notes, scope: Option<ClearScope>, named: Option<&str>, archive: bool, unarchive: bool, dry_run: bool) {
     let mut any = false;
 
     if let Some(name) = named {
-        match notes.remove_named(name, dry_run) {
+        let result = if unarchive {
+            notes.unarchive_named(name, dry_run)
+        } else if archive {
+            notes.archive_named(name, dry_run)
+        } else {
+            notes.remove_named(name, dry_run)
+        };
+        match result {
             Ok(true) => {
-                let verb = if dry_run { "would remove" } else { "removed" };
+                let verb = if dry_run {
+                    if unarchive { "would unarchive" } else if archive { "would archive" } else { "would remove" }
+                } else if unarchive { "unarchived" } else if archive { "archived" } else { "removed" };
                 println!("tnote clean: {} named note '{}'", verb, name.if_supports_color(Stdout, |t| t.yellow()));
                 any = true;
             }
@@ -501,6 +526,36 @@ fn cmd_list(notes: &Notes, config: &Config) {
             eprintln!("tnote list: {}", e);
             std::process::exit(1);
         }
+    }
+}
+
+fn cmd_list_archive(notes: &Notes) {
+    let archive = notes.archive_dir();
+    let entries = match std::fs::read_dir(&archive) {
+        Ok(e) => e,
+        Err(_) => {
+            println!("tnote list: (no archived notes)");
+            return;
+        }
+    };
+    let mut items: Vec<(String, usize)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let name = name.strip_prefix("named-")?.strip_suffix(".md")?.to_string();
+            let lines = std::fs::read_to_string(e.path()).unwrap_or_default().lines().count();
+            Some((name, lines))
+        })
+        .collect();
+    if items.is_empty() {
+        println!("tnote list: (no archived notes)");
+        return;
+    }
+    items.sort();
+    let max_w = items.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+    println!("{}", "archived:".if_supports_color(Stdout, |t| t.style(owo_colors::Style::new().cyan().bold())));
+    for (name, lines) in &items {
+        println!("  {}{}  {} lines", name, " ".repeat(max_w - name.len()), lines);
     }
 }
 
