@@ -397,18 +397,16 @@ fn cmd_name_picker(notes: &Notes, window_key: Option<&str>) {
     match name_picker::run(&note_names) {
         Ok(Some(name_picker::Selection::Existing(name))) => {
             cmd_name_target(notes, window_key, &name);
-            return;
         }
         Ok(Some(name_picker::Selection::PromptNew)) => {
             tmux::prompt_name_for_target(window_key);
-            return;
         }
-        Ok(None) => return,
+        Ok(None) => (),
         Err(e) => {
             eprintln!("tnote name: {}", e);
             std::process::exit(1);
         }
-    };
+    }
 }
 
 fn cmd_name_target(notes: &Notes, window_key: &str, name: &str) {
