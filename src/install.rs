@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::tmux::shell_escape;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -20,6 +21,17 @@ fn user_tmux_conf() -> Option<PathBuf> {
 
 fn home_dir() -> Option<PathBuf> {
     std::env::var("HOME").ok().map(PathBuf::from)
+}
+
+fn executable_path() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.into_os_string().into_string().ok())
+        .unwrap_or_else(|| "tnote".to_string())
+}
+
+fn tmux_run_shell(cmd: &str) -> String {
+    format!("run-shell {}", shell_escape(cmd))
 }
 
 /// Detect the user's shell from $SHELL.
@@ -175,19 +187,36 @@ pub fn run(config: &Config) {
         }
 
         let key = &config.key;
+        let tnote_bin = executable_path();
+        let tnote_cmd = tmux_run_shell(&tnote_bin);
+        let tnote_show_cmd = tmux_run_shell(&format!("{} show", shell_escape(&tnote_bin)));
+        let tnote_list_cmd = tmux_run_shell(&format!("{} list", shell_escape(&tnote_bin)));
+        let tnote_path_cmd = tmux_run_shell(&format!("{} path", shell_escape(&tnote_bin)));
+        let tnote_clean_cmd = tmux_run_shell(&format!("{} clean", shell_escape(&tnote_bin)));
+        let tnote_help_cmd = tmux_run_shell(&format!("{} help", shell_escape(&tnote_bin)));
+        let tnote_name_cmd = tmux_run_shell(&format!("{} name", shell_escape(&tnote_bin)));
+        let tnote_ls_cmd = tmux_run_shell(&format!("{} ls", shell_escape(&tnote_bin)));
         let tmux_conf = format!(
             "# tnote key bindings — managed by 'tnote setup' / 'tnote uninstall'\n\
              unbind-key {key}\n\
-             bind-key {key} run-shell 'tnote'\n\
-             set -s command-alias[100] \"tnote=run-shell 'tnote'\"\n\
-             set -s command-alias[101] \"tnote-show=run-shell 'tnote show'\"\n\
-             set -s command-alias[102] \"tnote-list=run-shell 'tnote list'\"\n\
-             set -s command-alias[103] \"tnote-path=run-shell 'tnote path'\"\n\
-             set -s command-alias[104] \"tnote-clean=run-shell 'tnote clean'\"\n\
-             set -s command-alias[105] \"tnote-help=run-shell 'tnote help'\"\n\
-             set -s command-alias[106] \"tnote-name=run-shell 'tnote name'\"\n\
-             set -s command-alias[107] \"tnote-ls=run-shell 'tnote ls'\"\n",
+             bind-key {key} {tnote_cmd}\n\
+             set -s command-alias[100] \"tnote={tnote_cmd}\"\n\
+             set -s command-alias[101] \"tnote-show={tnote_show_cmd}\"\n\
+             set -s command-alias[102] \"tnote-list={tnote_list_cmd}\"\n\
+             set -s command-alias[103] \"tnote-path={tnote_path_cmd}\"\n\
+             set -s command-alias[104] \"tnote-clean={tnote_clean_cmd}\"\n\
+             set -s command-alias[105] \"tnote-help={tnote_help_cmd}\"\n\
+             set -s command-alias[106] \"tnote-name={tnote_name_cmd}\"\n\
+             set -s command-alias[107] \"tnote-ls={tnote_ls_cmd}\"\n",
             key = key,
+            tnote_cmd = tnote_cmd,
+            tnote_show_cmd = tnote_show_cmd,
+            tnote_list_cmd = tnote_list_cmd,
+            tnote_path_cmd = tnote_path_cmd,
+            tnote_clean_cmd = tnote_clean_cmd,
+            tnote_help_cmd = tnote_help_cmd,
+            tnote_name_cmd = tnote_name_cmd,
+            tnote_ls_cmd = tnote_ls_cmd,
         );
 
         if let Err(e) = fs::write(&tmux_conf_path, &tmux_conf) {

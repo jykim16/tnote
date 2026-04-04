@@ -508,7 +508,12 @@ fn setup_writes_tmux_conf_and_updates_tmux_conf_file() {
     child.stdin.take().unwrap().write_all(b"\n\n\n\n").unwrap();
     let status = child.wait().unwrap();
     assert!(status.success());
-    assert!(dir.path().join("meta").join("tmux.conf").exists());
+    let tnote_conf = dir.path().join("meta").join("tmux.conf");
+    assert!(tnote_conf.exists());
+    let tnote_conf_content = fs::read_to_string(&tnote_conf).unwrap();
+    assert!(tnote_conf_content.contains(binary().to_string_lossy().as_ref()));
+    assert!(tnote_conf_content.contains("tnote-name=run-shell"));
+    assert!(tnote_conf_content.contains(" name'"));
     let user_conf = home.path().join(".tmux.conf");
     assert!(user_conf.exists());
     let content = fs::read_to_string(&user_conf).unwrap();
