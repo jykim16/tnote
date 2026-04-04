@@ -63,7 +63,7 @@ tnote setup
 
 ```
 tnote                       Open/toggle popup for the current window
-tnote name <name>           Name this window's note (also renames the tmux window)
+tnote name <name>           Name or rebind this window's note (also renames the tmux window)
 tnote show                  Print note contents inline
 tnote list                  List all notes with line counts
 tnote path                  Print the note file path
@@ -79,7 +79,7 @@ tnote help                  Show help
 
 **tmux** — one note per tmux window, keyed by stable session and window IDs. Unaffected by session or window renames. Cleaned by `tnote clean` once the window is closed.
 
-**named** — created with `tnote name <name>`. The current window gets a `.link` pointing to `named-<name>.md`. Two windows can share a note by using the same name. Never auto-cleaned.
+**named** — a preserved note that persists even after closing a terminal session. Created with `tnote name <name>`. Multiple sessions can share a note by using the same name.
 
 **shell** — one note per shell session (parent PID), used when running outside tmux. Cleaned by `tnote clean` once the shell process exits.
 

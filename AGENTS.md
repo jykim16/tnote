@@ -24,3 +24,7 @@ Any feature that is validated end-to-end (e.g. manually tested via CLI commands)
 ```
 docker build -f tests/integration/Dockerfile -t tnote-test . && docker run --rm tnote-test
 ```
+
+## Skills
+
+The `tnote-agent` and `tnote-manager` skills in `skills/` depend on each other's note format. If you change the tnote note structure (sections, `---` separators, header fields) in the agent skill, update the manager skill to match — especially §5 (write an agent note) and §7 (spawn), which parse agent notes with `awk`.

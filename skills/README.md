@@ -14,8 +14,10 @@ Two skills for agentic tnote use:
 ```
 Install the tnote agent skills into this project. Run these commands:
 
+First create the destination skill directories:
 mkdir -p .claude/skills/tnote-agent .claude/skills/tnote-manager
 
+Then download the skill files:
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-agent/SKILL.md   -o .claude/skills/tnote-agent/SKILL.md
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md -o .claude/skills/tnote-manager/SKILL.md
 ```
@@ -34,8 +36,10 @@ curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manag
 ```
 Install the tnote agent skills into this project as Kiro steering files. Run these commands:
 
+First create the destination steering directory:
 mkdir -p .kiro/steering
 
+Then download the steering files:
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-agent/SKILL.md   -o .kiro/steering/tnote-agent.md
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md -o .kiro/steering/tnote-manager.md
 
@@ -65,16 +69,18 @@ Then read the root and worspace directory in .kiro/agents. If agent specs exist,
 ``` 
 Install the tnote agent skills into this project. Run these commands:
 
-mkdir -p .agents/skills/tnote-agent .agents/skills/tnote-manager
+First create the destination skill directories:
+mkdir -p ~/.codex/skills/tnote-agent ~/.codex/skills/tnote-manager
 
-curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-agent/SKILL.md   -o .agents/skills/tnote-agent/SKILL.md
-curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md -o .agents/skills/tnote-manager/SKILL.md
+Then download the skill files:
+curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-agent/SKILL.md   -o ~/.codex/skills/tnote-agent/SKILL.md
+curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md -o ~/.codex/skills/tnote-manager/SKILL.md
  
 For live tnote note updates, also make sure Codex can write to the default tnote note store by adding `~/.tnote` to `sandbox_workspace_write.writable_roots`.
 
 If `~/.codex/config.toml` already exists, update that file.
 
-Only create or update a project-scoped `.codex/config.toml` if `~/.codex/config.toml` does not already exist.
+If `~/.codex/config.toml` does not exist yet, create it.
 
 Add:
 
@@ -82,4 +88,4 @@ Add:
 writable_roots = ["~/.tnote"]
 ```
 
-If you set `sandbox_workspace_write.writable_roots` in a project-scoped `.codex/config.toml`, include every extra writable root you still want for that project when setting that key.
+If `~/.codex/config.toml` already defines `sandbox_workspace_write.writable_roots`, preserve any existing entries and add `~/.tnote` to that list.
