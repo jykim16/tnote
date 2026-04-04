@@ -527,8 +527,6 @@ fn cmd_show(notes: &Notes, name: Option<&str>) {
 }
 
 fn cmd_clean(notes: &Notes, scope: Option<ClearScope>, named: Option<&str>, archive: bool, unarchive: bool, dry_run: bool) {
-    let mut any = false;
-
     if let Some(name) = named {
         let result = if unarchive {
             notes.unarchive_named(name, dry_run)
@@ -543,7 +541,6 @@ fn cmd_clean(notes: &Notes, scope: Option<ClearScope>, named: Option<&str>, arch
                     if unarchive { "would unarchive" } else if archive { "would archive" } else { "would remove" }
                 } else if unarchive { "unarchived" } else if archive { "archived" } else { "removed" };
                 println!("tnote clean: {} named note '{}'", verb, name.if_supports_color(Stdout, |t| t.yellow()));
-                any = true;
             }
             Ok(false) => {
                 eprintln!("tnote clean: named note '{}' not found", name);
@@ -554,9 +551,12 @@ fn cmd_clean(notes: &Notes, scope: Option<ClearScope>, named: Option<&str>, arch
                 std::process::exit(1);
             }
         }
+
+        return;
     }
 
     let lib_scope: Option<notes::ClearScope> = scope.map(Into::into);
+    let mut any = false;
     match notes.cleanup_orphaned(lib_scope.as_ref(), dry_run) {
         Ok(removed) if !removed.is_empty() => {
             let verb = if dry_run { "would remove" } else { "removed" };

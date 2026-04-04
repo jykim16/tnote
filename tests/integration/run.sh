@@ -99,6 +99,15 @@ tnote clean --name archivetest --archive | grep -q "archived" && pass "archive m
 [ -f "$TNOTE_DIR/archive/named-archivetest.md" ] && pass "archive creates archive file" || fail "archive creates archive file"
 grep -q "archive me" "$TNOTE_DIR/archive/named-archivetest.md" && pass "archive preserves content" || fail "archive preserves content"
 
+# clean --name --archive leaves unrelated bindings alone
+tnote name archiveisolated
+echo "archive isolated" > "$TNOTE_DIR/named-archiveisolated.md"
+tnote name unrelated-live --bind '$9+@18' >/dev/null
+ARCHIVE_OUTPUT=$(tnote clean --name archiveisolated --archive 2>&1)
+[ -f "$TNOTE_DIR/meta/tmux-\$9+@18.link" ] && pass "archive keeps unrelated tmux link" || fail "archive keeps unrelated tmux link"
+! echo "$ARCHIVE_OUTPUT" | grep -q "tmux-\$9+@18" && pass "archive avoids unrelated cleanup output" || fail "archive avoids unrelated cleanup output"
+rm -f "$TNOTE_DIR/meta/tmux-\$9+@18.link" "$TNOTE_DIR/named-unrelated-live.md"
+
 # clean --name --archive (nonexistent)
 ! tnote clean --name ghost --archive 2>/dev/null && pass "archive nonexistent exits nonzero" || fail "archive nonexistent exits nonzero"
 
