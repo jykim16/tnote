@@ -383,6 +383,19 @@ impl Notes {
         Ok(notes)
     }
 
+    /// List all current named note names in sorted order.
+    pub fn named_note_names(&self) -> std::io::Result<Vec<String>> {
+        let mut names: Vec<String> = fs::read_dir(&self.dir)?
+            .filter_map(|entry| {
+                let path = entry.ok()?.path();
+                let stem = path.file_stem()?.to_str()?;
+                stem.strip_prefix("named-").map(|name| name.to_string())
+            })
+            .collect();
+        names.sort();
+        Ok(names)
+    }
+
 }
 
 pub fn is_pid_alive(pid: u32) -> bool {

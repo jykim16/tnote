@@ -63,7 +63,7 @@ tnote setup
 
 ```
 tnote                       Open/toggle popup for the current window
-tnote name <name>           Name or rebind this window's note (also renames the tmux window)
+tnote name [name]           Name or rebind this window's note (also renames the tmux window)
 tnote show                  Print note contents inline
 tnote list                  List all notes with line counts
 tnote path                  Print the note file path
@@ -91,7 +91,9 @@ tnote help                  Show help
 
 **Window keys** — tmux notes use `#{session_id}+#{window_id}` (e.g. `$1+@3`). These IDs are stable across renames, so renaming a session or window never breaks the note association. Display labels (e.g. `work+0`) are resolved from the live tmux state.
 
-**tmux command line** — you can also type `:tnote` in the tmux command prompt (press `:` first). Other commands: `:tnote-show`, `:tnote-list`, `:tnote-name`, `:tnote-path`, `:tnote-clean`, `:tnote-help`.
+**tmux command line** — you can also type `:tnote` in the tmux command prompt (press `:` first). Other commands: `:tnote-show`, `:tnote-list`, `:tnote-name`, `:tnote-path`, `:tnote-clean`, `:tnote-help`. Running `:tnote-name` opens a tmux-native menu of existing named notes plus a `New name...` prompt.
+
+**Shell completions** — `tnote completions bash|zsh|fish` emits completions that suggest existing named notes for `tnote name` and named-note flags like `tnote show -n`.
 
 ## File layout
 

@@ -230,8 +230,40 @@ pub fn display_message(msg: &str) {
         .status();
 }
 
-/// Show tmux's command-prompt asking for a note name, then run `tnote name <input>`.
-pub fn prompt_name() {
+fn new_name_prompt_command() -> String {
+    "command-prompt -p 'Note name:' \"run-shell 'tnote name %%'\"".to_string()
+}
+
+fn name_menu_args(note_names: &[String]) -> Vec<String> {
+    let mut args = vec![
+        "display-menu".to_string(),
+        "-T".to_string(),
+        " tnote name ".to_string(),
+        "New name...".to_string(),
+        "N".to_string(),
+        new_name_prompt_command(),
+    ];
+
+    for name in note_names {
+        let shell_cmd = format!("tnote name {}", shell_escape(name));
+        args.push(name.clone());
+        args.push(String::new());
+        args.push(format!("run-shell {}", shell_escape(&shell_cmd)));
+    }
+
+    args
+}
+
+/// Show tmux's note-naming menu, with a fallback prompt if the menu fails.
+pub fn prompt_name(note_names: &[String]) {
+    let status = Command::new("tmux")
+        .args(name_menu_args(note_names))
+        .status();
+
+    if status.as_ref().is_ok_and(|s| s.success()) {
+        return;
+    }
+
     let _ = Command::new("tmux")
         .args(["command-prompt", "-p", "Note name:", "run-shell 'tnote name %%'"])
         .status();
@@ -324,5 +356,21 @@ mod tests {
         assert!(!requires(parse_version_str("3.1").unwrap()));
         assert!(!requires(parse_version_str("2.9").unwrap()));
         assert!(!requires(parse_version_str("3.0").unwrap()));
+    }
+
+    #[test]
+    fn name_menu_args_include_new_name_entry() {
+        let args = name_menu_args(&[]);
+        assert_eq!(args[0], "display-menu");
+        assert!(args.iter().any(|arg| arg == "New name..."));
+        assert!(args.iter().any(|arg| arg.contains("command-prompt")));
+    }
+
+    #[test]
+    fn name_menu_args_include_existing_names() {
+        let args = name_menu_args(&["alpha".to_string(), "beta project".to_string()]);
+        assert!(args.iter().any(|arg| arg == "alpha"));
+        assert!(args.iter().any(|arg| arg == "beta project"));
+        assert!(args.iter().any(|arg| arg.contains("run-shell")));
     }
 }

@@ -1,5 +1,9 @@
 #!/bin/sh
 # Fake tmux for testing. Responds to key subcommands used by tnote.
+if [ -n "$FAKE_TMUX_LOG" ]; then
+  printf '%s\n' "$*" >> "$FAKE_TMUX_LOG"
+fi
+
 case "$1" in
   display-message)
     # Return a fake session name (not a popup session)

@@ -129,6 +129,7 @@ rm -rf "$TNOTE_DIR/archive"
 tnote completions bash | grep -q "complete" && pass "completions bash" || fail "completions bash"
 tnote completions zsh | grep -q "compdef" && pass "completions zsh" || fail "completions zsh"
 tnote completions fish | grep -q "complete" && pass "completions fish" || fail "completions fish"
+tnote __complete-named-notes | grep -q "testproject" && pass "named note completion source" || fail "named note completion source"
 
 # version
 tnote --version | grep -q "tnote" && pass "--version" || fail "--version"

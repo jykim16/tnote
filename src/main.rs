@@ -106,6 +106,9 @@ enum Cmd {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+    /// Internal: print existing named notes for shell completion
+    #[command(name = "__complete-named-notes", hide = true)]
+    CompleteNamedNotes,
     /// Internal: run editor inline when already inside a tmux display-popup
     #[command(hide = true)]
     Popup { window_key: Option<String> },
@@ -123,7 +126,7 @@ fn main() {
 
     match &cli.command {
         None => cmd_open(&config, &notes, cli.name.as_deref()),
-        Some(Cmd::Name { name, bind, unbind }) => cmd_name(&notes, name.as_deref(), bind.as_deref(), unbind.as_deref()),
+        Some(Cmd::Name { name, bind, unbind }) => cmd_name(&config, &notes, name.as_deref(), bind.as_deref(), unbind.as_deref()),
         Some(Cmd::Show { name }) => cmd_show(&notes, name.as_deref()),
         Some(Cmd::Clean { all, name, archive, unarchive, dryrun }) => cmd_clean(&notes, all.clone(), name.as_deref(), *archive, *unarchive, *dryrun),
         Some(Cmd::List { archive }) => {
@@ -137,9 +140,8 @@ fn main() {
         Some(Cmd::Setup) => cmd_setup(&config),
         Some(Cmd::Uninstall) => install::uninstall(&config),
         Some(Cmd::Help) => print_help(),
-        Some(Cmd::Completions { shell }) => {
-            clap_complete::generate(*shell, &mut Cli::command(), "tnote", &mut std::io::stdout());
-        }
+        Some(Cmd::Completions { shell }) => cmd_completions(*shell),
+        Some(Cmd::CompleteNamedNotes) => cmd_complete_named_notes(&notes),
         Some(Cmd::Popup { window_key }) => {
             let key = window_key.as_deref()
                 .filter(|s| !s.is_empty())
@@ -286,10 +288,11 @@ fn resolve_bind_target(notes: &Notes, target: Option<&str>) -> Result<String, St
     }
 }
 
-fn cmd_name(notes: &Notes, name: Option<&str>, bind: Option<&str>, unbind: Option<&str>) {
+fn cmd_name(_config: &Config, notes: &Notes, name: Option<&str>, bind: Option<&str>, unbind: Option<&str>) {
     let Some(name) = name else {
         if tmux::is_in_tmux() {
-            tmux::prompt_name();
+            let note_names = notes.named_note_names().unwrap_or_default();
+            tmux::prompt_name(&note_names);
         } else {
             eprintln!("tnote name: provide a name, e.g.: tnote name <name>");
             std::process::exit(1);
@@ -674,6 +677,144 @@ fn cmd_path(notes: &Notes, name: Option<&str>) {
     println!("{}", file.display());
 }
 
+fn cmd_complete_named_notes(notes: &Notes) {
+    if let Ok(note_names) = notes.named_note_names() {
+        for name in note_names {
+            println!("{}", name);
+        }
+    }
+}
+
+fn cmd_completions(shell: clap_complete::Shell) {
+    let script = match shell {
+        clap_complete::Shell::Bash => bash_completions(),
+        clap_complete::Shell::Zsh => zsh_completions(),
+        clap_complete::Shell::Fish => fish_completions(),
+        _ => {
+            let mut cmd = Cli::command();
+            clap_complete::generate(shell, &mut cmd, "tnote", &mut std::io::stdout());
+            return;
+        }
+    };
+
+    print!("{}", script);
+}
+
+fn bash_completions() -> &'static str {
+    r#"_tnote_named_notes() {
+    tnote __complete-named-notes 2>/dev/null
+}
+
+_tnote() {
+    local cur prev cmd
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev=""
+    if (( COMP_CWORD > 0 )); then
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+    fi
+    cmd=""
+    if (( ${#COMP_WORDS[@]} > 1 )); then
+        cmd="${COMP_WORDS[1]}"
+    fi
+
+    case "$prev" in
+        completions)
+            COMPREPLY=( $(compgen -W "bash zsh fish elvish powershell" -- "$cur") )
+            return
+            ;;
+        --all)
+            COMPREPLY=( $(compgen -W "unprefixed named tmux all" -- "$cur") )
+            return
+            ;;
+        -n|--name)
+            if [[ "$cmd" == "show" || "$cmd" == "clean" || "$cmd" == "path" ]]; then
+                COMPREPLY=( $(compgen -W "$(_tnote_named_notes)" -- "$cur") )
+                return
+            fi
+            ;;
+    esac
+
+    if (( COMP_CWORD == 1 )); then
+        COMPREPLY=( $(compgen -W "name show clean list ls path setup uninstall help completions" -- "$cur") )
+        return
+    fi
+
+    if [[ "$cmd" == "name" && $COMP_CWORD -eq 2 && "$cur" != -* ]]; then
+        COMPREPLY=( $(compgen -W "$(_tnote_named_notes)" -- "$cur") )
+        return
+    fi
+}
+
+complete -F _tnote tnote
+"#
+}
+
+fn zsh_completions() -> &'static str {
+    r#"#compdef tnote
+
+_tnote_named_notes() {
+  local -a notes
+  notes=("${(@f)$(tnote __complete-named-notes 2>/dev/null)}")
+  (( ${#notes[@]} )) && compadd -- $notes
+}
+
+_tnote() {
+  local cur prev cmd
+  cur="${words[CURRENT]}"
+  prev=""
+  (( CURRENT > 1 )) && prev="${words[CURRENT-1]}"
+  cmd=""
+  (( ${#words[@]} > 1 )) && cmd="${words[2]}"
+
+  if (( CURRENT == 2 )); then
+    compadd -- name show clean list ls path setup uninstall help completions
+    return
+  fi
+
+  case "$prev" in
+    completions)
+      compadd -- bash zsh fish elvish powershell
+      return
+      ;;
+    --all)
+      compadd -- unprefixed named tmux all
+      return
+      ;;
+    -n|--name)
+      if [[ "$cmd" == "show" || "$cmd" == "clean" || "$cmd" == "path" ]]; then
+        _tnote_named_notes
+        return
+      fi
+      ;;
+  esac
+
+  if [[ "$cmd" == "name" && CURRENT -eq 3 && "$cur" != -* ]]; then
+    _tnote_named_notes
+    return
+  fi
+}
+
+compdef _tnote tnote
+"#
+}
+
+fn fish_completions() -> &'static str {
+    r#"function __tnote_named_notes
+    tnote __complete-named-notes 2>/dev/null
+end
+
+complete -c tnote -f
+complete -c tnote -n '__fish_use_subcommand' -a 'name show clean list ls path setup uninstall help completions'
+complete -c tnote -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish elvish powershell'
+complete -c tnote -n '__fish_seen_subcommand_from clean' -l all -a 'unprefixed named tmux all'
+complete -c tnote -n '__fish_seen_subcommand_from show clean path' -s n -l name -a '(__tnote_named_notes)'
+complete -c tnote -n '__fish_seen_subcommand_from name' -l bind
+complete -c tnote -n '__fish_seen_subcommand_from name' -l unbind
+complete -c tnote -n '__fish_seen_subcommand_from name; and not __fish_seen_subcommand_from --bind --unbind' -a '(__tnote_named_notes)'
+"#
+}
+
 fn cmd_setup(config: &Config) {
     println!("tnote setup\n");
 
@@ -756,7 +897,7 @@ fn print_help() {
 
 USAGE:
   tnote                            Open editor for the current window
-  tnote name <name>                Name or rebind this window's note (also renames the tmux window)
+  tnote name [name]                Name or rebind this window's note (also renames the tmux window)
   tnote name <name> --bind [key]   Bind the current session, or one specific tmux/shell binding, to a named note
   tnote name <name> --unbind [key] Remove all bindings for a named note, or one specific binding
   tnote show                       Print note contents inline
@@ -771,7 +912,7 @@ USAGE:
 TMUX COMMAND LINE (works while a process is running):
   Press ':' in any tmux window, then type:
     tnote              Open note popup
-    tnote-name         Interactive name prompt
+    tnote-name         Name menu with existing notes plus a new-name prompt
     tnote-show         Print note contents
     tnote-clean        Remove orphaned notes
     tnote-list         List all notes

@@ -454,6 +454,36 @@ fn name_in_tmux_renames_window() {
     assert!(status.success());
 }
 
+#[test]
+fn name_without_argument_in_tmux_opens_name_menu() {
+    let dir = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let log = dir.path().join("fake-tmux.log");
+
+    fs::write(dir.path().join("named-alpha.md"), "").unwrap();
+    fs::write(dir.path().join("named-beta project.md"), "").unwrap();
+
+    let status = Command::new(binary())
+        .env("TNOTE_DIR", dir.path())
+        .env("HOME", home.path())
+        .env("TMUX", "/tmp/fake-tmux,0,0")
+        .env("EDITOR", "true")
+        .env("FAKE_TMUX_LOG", &log)
+        .env("PATH", format!("{}:{}", fake_tmux_bin_dir().display(),
+                             std::env::var("PATH").unwrap_or_default()))
+        .arg("name")
+        .output()
+        .unwrap()
+        .status;
+
+    assert!(status.success());
+    let recorded = fs::read_to_string(&log).unwrap();
+    assert!(recorded.contains("display-menu"));
+    assert!(recorded.contains("New name..."));
+    assert!(recorded.contains("alpha"));
+    assert!(recorded.contains("beta project"));
+}
+
 // ── tnote setup / uninstall ───────────────────────────────────────────────────
 
 #[test]
@@ -510,6 +540,41 @@ fn uninstall_removes_source_line_from_tmux_conf() {
     assert!(status.success());
     let content = fs::read_to_string(&user_conf).unwrap();
     assert!(!content.contains("source-file"));
+}
+
+#[test]
+fn complete_named_notes_prints_existing_named_notes() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-beta.md"), "").unwrap();
+    fs::write(dir.path().join("named-alpha.md"), "").unwrap();
+    fs::write(dir.path().join("shell-123.md"), "").unwrap();
+
+    let out = stdout(tnote(dir.path()).args(["__complete-named-notes"]));
+    assert_eq!(out, "alpha\nbeta\n");
+}
+
+#[test]
+fn completions_bash_include_dynamic_named_note_helper() {
+    let dir = TempDir::new().unwrap();
+    let out = stdout(tnote(dir.path()).args(["completions", "bash"]));
+    assert!(out.contains("__complete-named-notes"));
+    assert!(out.contains("complete -F _tnote tnote"));
+}
+
+#[test]
+fn completions_zsh_include_dynamic_named_note_helper() {
+    let dir = TempDir::new().unwrap();
+    let out = stdout(tnote(dir.path()).args(["completions", "zsh"]));
+    assert!(out.contains("__complete-named-notes"));
+    assert!(out.contains("compdef _tnote tnote"));
+}
+
+#[test]
+fn completions_fish_include_dynamic_named_note_helper() {
+    let dir = TempDir::new().unwrap();
+    let out = stdout(tnote(dir.path()).args(["completions", "fish"]));
+    assert!(out.contains("__complete-named-notes"));
+    assert!(out.contains("complete -c tnote"));
 }
 
 // ── --name flag ───────────────────────────────────────────────────────────────
