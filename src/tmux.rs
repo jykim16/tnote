@@ -230,43 +230,94 @@ pub fn display_message(msg: &str) {
         .status();
 }
 
-fn new_name_prompt_command() -> String {
-    "command-prompt -p 'Note name:' \"run-shell 'tnote name %%'\"".to_string()
+fn executable_path() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.into_os_string().into_string().ok())
+        .unwrap_or_else(|| "tnote".to_string())
 }
 
-fn name_menu_args(note_names: &[String]) -> Vec<String> {
-    let mut args = vec![
-        "display-menu".to_string(),
-        "-T".to_string(),
-        " tnote name ".to_string(),
-        "New name...".to_string(),
-        "N".to_string(),
-        new_name_prompt_command(),
-    ];
-
-    for name in note_names {
-        let shell_cmd = format!("tnote name {}", shell_escape(name));
-        args.push(name.clone());
-        args.push(String::new());
-        args.push(format!("run-shell {}", shell_escape(&shell_cmd)));
-    }
-
-    args
+fn name_picker_attach_cmd(window_key: &str) -> String {
+    let binary = executable_path();
+    format!(
+        "/bin/sh -lc {cmd}",
+        cmd = shell_escape(&format!(
+            "export TNOTE_WINDOW_KEY={key}; \
+             python3 - <<'PY'\n\
+import os, selectors, sys, time\n\
+sel = selectors.DefaultSelector()\n\
+sel.register(sys.stdin, selectors.EVENT_READ)\n\
+deadline = time.time() + 0.15\n\
+while time.time() < deadline:\n\
+    events = sel.select(timeout=max(0.0, deadline - time.time()))\n\
+    if not events:\n\
+        break\n\
+    try:\n\
+        os.read(sys.stdin.fileno(), 4096)\n\
+    except OSError:\n\
+        break\n\
+PY\n\
+             exec {bin} __name-picker",
+            key = shell_escape(window_key),
+            bin = shell_escape(&binary),
+        )),
+    )
 }
 
-/// Show tmux's note-naming menu, with a fallback prompt if the menu fails.
-pub fn prompt_name(note_names: &[String]) {
-    let status = Command::new("tmux")
-        .args(name_menu_args(note_names))
-        .status();
+fn name_prompt_command(window_key: &str) -> String {
+    let binary = executable_path();
+    format!(
+        "run-shell {}",
+        shell_escape(&format!(
+            "{} __name-target {} %%",
+            shell_escape(&binary),
+            shell_escape(window_key),
+        )),
+    )
+}
 
-    if status.as_ref().is_ok_and(|s| s.success()) {
-        return;
-    }
+/// Show tmux's note-naming picker in a popup session using configured dimensions.
+pub fn prompt_name(config: &crate::config::Config, window_key: &str) {
+    let attach_cmd = name_picker_attach_cmd(window_key);
 
     let _ = Command::new("tmux")
-        .args(["command-prompt", "-p", "Note name:", "run-shell 'tnote name %%'"])
+        .args([
+            "display-popup",
+            "-x", "R", "-y", "T",
+            "-w", &config.width,
+            "-h", &config.height,
+            "-b", "rounded",
+            "-T", " tnote name ",
+            "-E", &attach_cmd,
+        ])
         .status();
+}
+
+/// Show tmux's command prompt to enter a new note name for a specific window key.
+pub fn prompt_name_for_target(window_key: &str) {
+    let _ = Command::new("tmux")
+        .args(["command-prompt", "-p", "Note name:", &name_prompt_command(window_key)])
+        .status();
+}
+
+fn tmux_rename_target_from_key(key: &str) -> Option<&str> {
+    let target = key.strip_prefix("tmux-")?;
+    let (_, window_id) = target.split_once('+')?;
+    if window_id.starts_with('@') {
+        Some(window_id)
+    } else {
+        None
+    }
+}
+
+/// Rename a specific tmux window by key.
+pub fn rename_window_target(key: &str, name: &str) {
+    let Some(target) = tmux_rename_target_from_key(key) else {
+        return;
+    };
+    let _ = Command::new("tmux")
+        .args(["rename-window", "-t", target, name])
+        .output();
 }
 
 #[cfg(test)]
@@ -359,18 +410,34 @@ mod tests {
     }
 
     #[test]
-    fn name_menu_args_include_new_name_entry() {
-        let args = name_menu_args(&[]);
-        assert_eq!(args[0], "display-menu");
-        assert!(args.iter().any(|arg| arg == "New name..."));
-        assert!(args.iter().any(|arg| arg.contains("command-prompt")));
+    fn name_picker_attach_cmd_carries_window_key() {
+        let cmd = name_picker_attach_cmd("tmux-$1+@3");
+        assert!(cmd.contains("/bin/sh -lc"));
+        assert!(cmd.contains("TNOTE_WINDOW_KEY"));
+        assert!(cmd.contains("__name-picker"));
     }
 
     #[test]
-    fn name_menu_args_include_existing_names() {
-        let args = name_menu_args(&["alpha".to_string(), "beta project".to_string()]);
-        assert!(args.iter().any(|arg| arg == "alpha"));
-        assert!(args.iter().any(|arg| arg == "beta project"));
-        assert!(args.iter().any(|arg| arg.contains("run-shell")));
+    fn name_prompt_command_targets_hidden_subcommand() {
+        let cmd = name_prompt_command("tmux-$1+@3");
+        assert!(cmd.contains("run-shell"));
+        assert!(cmd.contains("__name-target"));
+        assert!(cmd.contains("tmux-$1+@3"));
+    }
+
+    #[test]
+    fn rename_window_target_ignores_non_tmux_keys() {
+        rename_window_target("shell-1234", "demo");
+    }
+
+    #[test]
+    fn tmux_rename_target_from_key_uses_window_id() {
+        assert_eq!(tmux_rename_target_from_key("tmux-$1+@3"), Some("@3"));
+    }
+
+    #[test]
+    fn tmux_rename_target_from_key_rejects_invalid_key() {
+        assert_eq!(tmux_rename_target_from_key("tmux-$1+3"), None);
+        assert_eq!(tmux_rename_target_from_key("shell-1234"), None);
     }
 }

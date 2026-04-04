@@ -1,4 +1,4 @@
-use tnote::{config, editor, install, notes, tmux};
+use tnote::{config, editor, install, name_picker, notes, tmux};
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use config::Config;
@@ -109,6 +109,17 @@ enum Cmd {
     /// Internal: print existing named notes for shell completion
     #[command(name = "__complete-named-notes", hide = true)]
     CompleteNamedNotes,
+    /// Internal: interactive tmux popup picker for note naming
+    #[command(name = "__name-picker", hide = true)]
+    NamePicker {
+        window_key: Option<String>,
+    },
+    /// Internal: name a specific tmux target from tmux command-prompt
+    #[command(name = "__name-target", hide = true)]
+    NameTarget {
+        window_key: String,
+        name: String,
+    },
     /// Internal: run editor inline when already inside a tmux display-popup
     #[command(hide = true)]
     Popup { window_key: Option<String> },
@@ -142,6 +153,14 @@ fn main() {
         Some(Cmd::Help) => print_help(),
         Some(Cmd::Completions { shell }) => cmd_completions(*shell),
         Some(Cmd::CompleteNamedNotes) => cmd_complete_named_notes(&notes),
+        Some(Cmd::NamePicker { window_key }) => {
+            let key = window_key.as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var("TNOTE_WINDOW_KEY").ok());
+            cmd_name_picker(&notes, key.as_deref());
+        }
+        Some(Cmd::NameTarget { window_key, name }) => cmd_name_target(&notes, window_key, name),
         Some(Cmd::Popup { window_key }) => {
             let key = window_key.as_deref()
                 .filter(|s| !s.is_empty())
@@ -291,8 +310,8 @@ fn resolve_bind_target(notes: &Notes, target: Option<&str>) -> Result<String, St
 fn cmd_name(_config: &Config, notes: &Notes, name: Option<&str>, bind: Option<&str>, unbind: Option<&str>) {
     let Some(name) = name else {
         if tmux::is_in_tmux() {
-            let note_names = notes.named_note_names().unwrap_or_default();
-            tmux::prompt_name(&note_names);
+            let window_key = current_note(notes).0;
+            tmux::prompt_name(_config, &window_key);
         } else {
             eprintln!("tnote name: provide a name, e.g.: tnote name <name>");
             std::process::exit(1);
@@ -357,6 +376,49 @@ fn cmd_name(_config: &Config, notes: &Notes, name: Option<&str>, bind: Option<&s
             }
             if tmux::is_in_tmux() && bind.is_none() {
                 tmux::rename_window(name);
+                tmux::display_message(&format!("tnote: note named '{}'", name));
+            }
+            println!("tnote name: window note named '{}'", name);
+        }
+        Err(e) => {
+            eprintln!("tnote name: error naming note: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_name_picker(notes: &Notes, window_key: Option<&str>) {
+    let note_names = notes.named_note_names().unwrap_or_default();
+    let Some(window_key) = window_key else {
+        eprintln!("tnote name: missing tmux window key for popup picker");
+        std::process::exit(1);
+    };
+
+    match name_picker::run(&note_names) {
+        Ok(Some(name_picker::Selection::Existing(name))) => {
+            cmd_name_target(notes, window_key, &name);
+            return;
+        }
+        Ok(Some(name_picker::Selection::PromptNew)) => {
+            tmux::prompt_name_for_target(window_key);
+            return;
+        }
+        Ok(None) => return,
+        Err(e) => {
+            eprintln!("tnote name: {}", e);
+            std::process::exit(1);
+        }
+    };
+}
+
+fn cmd_name_target(notes: &Notes, window_key: &str, name: &str) {
+    match notes.name_window(window_key, name) {
+        Ok(migrated) => {
+            if migrated {
+                println!("tnote name: migrated existing notes → {}", name);
+            }
+            if window_key.starts_with("tmux-") {
+                tmux::rename_window_target(window_key, name);
                 tmux::display_message(&format!("tnote: note named '{}'", name));
             }
             println!("tnote name: window note named '{}'", name);

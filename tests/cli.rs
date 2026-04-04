@@ -455,11 +455,13 @@ fn name_in_tmux_renames_window() {
 }
 
 #[test]
-fn name_without_argument_in_tmux_opens_name_menu() {
+fn name_without_argument_in_tmux_opens_name_picker_popup_with_config_dimensions() {
     let dir = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     let log = dir.path().join("fake-tmux.log");
 
+    fs::create_dir_all(dir.path().join("meta")).unwrap();
+    fs::write(dir.path().join("meta").join("config"), "width=73\nheight=19\n").unwrap();
     fs::write(dir.path().join("named-alpha.md"), "").unwrap();
     fs::write(dir.path().join("named-beta project.md"), "").unwrap();
 
@@ -478,10 +480,10 @@ fn name_without_argument_in_tmux_opens_name_menu() {
 
     assert!(status.success());
     let recorded = fs::read_to_string(&log).unwrap();
-    assert!(recorded.contains("display-menu"));
-    assert!(recorded.contains("New name..."));
-    assert!(recorded.contains("alpha"));
-    assert!(recorded.contains("beta project"));
+    assert!(recorded.contains("display-popup"));
+    assert!(recorded.contains("-w 73"));
+    assert!(recorded.contains("-h 19"));
+    assert!(recorded.contains("__name-picker"));
 }
 
 // ── tnote setup / uninstall ───────────────────────────────────────────────────
