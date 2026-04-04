@@ -8,6 +8,8 @@ use owo_colors::{OwoColorize, Style, Stream::Stdout, Stream::Stderr};
 use std::fs;
 use std::path::PathBuf;
 
+const CURRENT_TARGET_SENTINEL: &str = "__current__";
+
 #[derive(ValueEnum, Clone)]
 enum ClearScope {
     /// Remove files without a recognized prefix (tmux-, shell-, named-)
@@ -45,8 +47,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Name this window's note (also renames the tmux window)
-    Name { name: Option<String> },
+    /// Name or rebind this window's note to a named note (also renames the tmux window)
+    Name {
+        name: Option<String>,
+        /// Bind the current tmux window / shell session, or a specific tmux window key / shell pid if provided
+        #[arg(long, value_name = "TARGET", num_args = 0..=1, default_missing_value = CURRENT_TARGET_SENTINEL, conflicts_with = "unbind")]
+        bind: Option<String>,
+        /// Unbind all links for this named note, or a specific tmux window key / shell pid if provided
+        #[arg(long, value_name = "TARGET", num_args = 0..=1, default_missing_value = CURRENT_TARGET_SENTINEL, conflicts_with = "bind")]
+        unbind: Option<String>,
+    },
     /// Print note contents inline
     Show {
         /// Show a specific named note
@@ -77,12 +87,6 @@ enum Cmd {
         /// List archived notes instead
         #[arg(long)]
         archive: bool,
-    },
-    /// Remove the tmux window binding from a named note
-    Unbind {
-        /// Unbind all windows from a specific named note
-        #[arg(short = 'n', long)]
-        name: Option<String>,
     },
     /// Print the note file path
     Path {
@@ -119,7 +123,7 @@ fn main() {
 
     match &cli.command {
         None => cmd_open(&config, &notes, cli.name.as_deref()),
-        Some(Cmd::Name { name }) => cmd_name(&notes, name.as_deref()),
+        Some(Cmd::Name { name, bind, unbind }) => cmd_name(&notes, name.as_deref(), bind.as_deref(), unbind.as_deref()),
         Some(Cmd::Show { name }) => cmd_show(&notes, name.as_deref()),
         Some(Cmd::Clean { all, name, archive, unarchive, dryrun }) => cmd_clean(&notes, all.clone(), name.as_deref(), *archive, *unarchive, *dryrun),
         Some(Cmd::List { archive }) => {
@@ -129,7 +133,6 @@ fn main() {
                 cmd_list(&notes, &config);
             }
         }
-        Some(Cmd::Unbind { name }) => cmd_unbind(&notes, name.as_deref()),
         Some(Cmd::Path { name }) => cmd_path(&notes, name.as_deref()),
         Some(Cmd::Setup) => cmd_setup(&config),
         Some(Cmd::Uninstall) => install::uninstall(&config),
@@ -233,7 +236,57 @@ fn cmd_popup_inline(_config: &Config, notes: &Notes, key: &str) {
     }
 }
 
-fn cmd_name(notes: &Notes, name: Option<&str>) {
+fn is_digits(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
+}
+
+fn is_tmux_window_id(s: &str) -> bool {
+    let Some((session, window)) = s.split_once("+@") else {
+        return false;
+    };
+
+    let Some(session) = session.strip_prefix('$') else {
+        return false;
+    };
+
+    is_digits(session) && is_digits(window)
+}
+
+fn normalize_bind_target(target: &str) -> Result<String, String> {
+    if let Some(pid) = target.strip_prefix("shell-") {
+        if is_digits(pid) {
+            return Ok(target.to_string());
+        }
+    }
+
+    if let Some(tmux_id) = target.strip_prefix("tmux-") {
+        if is_tmux_window_id(tmux_id) {
+            return Ok(target.to_string());
+        }
+    }
+
+    if is_digits(target) {
+        return Ok(format!("shell-{}", target));
+    }
+
+    if is_tmux_window_id(target) {
+        return Ok(format!("tmux-{}", target));
+    }
+
+    Err(format!(
+        "invalid bind target '{}'; expected shell-<pid>, <pid>, tmux-$SESSION+@WINDOW, or $SESSION+@WINDOW",
+        target
+    ))
+}
+
+fn resolve_bind_target(notes: &Notes, target: Option<&str>) -> Result<String, String> {
+    match target {
+        Some(CURRENT_TARGET_SENTINEL) | None => Ok(current_note(notes).0),
+        Some(target) => normalize_bind_target(target),
+    }
+}
+
+fn cmd_name(notes: &Notes, name: Option<&str>, bind: Option<&str>, unbind: Option<&str>) {
     let Some(name) = name else {
         if tmux::is_in_tmux() {
             tmux::prompt_name();
@@ -244,14 +297,62 @@ fn cmd_name(notes: &Notes, name: Option<&str>) {
         return;
     };
 
-    let (key, _) = current_note(notes);
+    if unbind.is_some() {
+        if unbind == Some(CURRENT_TARGET_SENTINEL) {
+            match notes.unbind_named(name) {
+                Ok(keys) if keys.is_empty() => {
+                    eprintln!("tnote name: no windows bound to '{}'", name);
+                    std::process::exit(1);
+                }
+                Ok(keys) => {
+                    for key in &keys {
+                        println!("tnote name: unbound {} from '{}'", key, name);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("tnote name: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
+
+        let key = match resolve_bind_target(notes, unbind) {
+            Ok(key) => key,
+            Err(e) => {
+                eprintln!("tnote name: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        match notes.unbind_named_key(name, &key) {
+            Ok(true) => println!("tnote name: unbound {} from '{}'", key, name),
+            Ok(false) => {
+                eprintln!("tnote name: {} is not bound to '{}'", key, name);
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("tnote name: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    let key = match resolve_bind_target(notes, bind) {
+        Ok(key) => key,
+        Err(e) => {
+            eprintln!("tnote name: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     match notes.name_window(&key, name) {
         Ok(migrated) => {
             if migrated {
                 println!("tnote name: migrated existing notes → {}", name);
             }
-            if tmux::is_in_tmux() {
+            if tmux::is_in_tmux() && bind.is_none() {
                 tmux::rename_window(name);
                 tmux::display_message(&format!("tnote: note named '{}'", name));
             }
@@ -559,40 +660,6 @@ fn cmd_list_archive(notes: &Notes) {
     }
 }
 
-fn cmd_unbind(notes: &Notes, name: Option<&str>) {
-    if let Some(n) = name {
-        match notes.unbind_named(n) {
-            Ok(keys) if keys.is_empty() => {
-                eprintln!("tnote unbind: no windows bound to '{}'", n);
-                std::process::exit(1);
-            }
-            Ok(keys) => {
-                for key in &keys {
-                    println!("tnote unbind: unbound {} from '{}'", key, n);
-                }
-            }
-            Err(e) => {
-                eprintln!("tnote unbind: {}", e);
-                std::process::exit(1);
-            }
-        }
-        return;
-    }
-
-    let (key, _) = current_note(notes);
-    match notes.unbind_key(&key) {
-        Ok(Some(name)) => println!("tnote unbind: unbound '{}' from this window", name),
-        Ok(None) => {
-            eprintln!("tnote unbind: this window has no named binding");
-            std::process::exit(1);
-        }
-        Err(e) => {
-            eprintln!("tnote unbind: {}", e);
-            std::process::exit(1);
-        }
-    }
-}
-
 fn cmd_path(notes: &Notes, name: Option<&str>) {
     if let Some(n) = name {
         let file = notes.dir.join(format!("named-{}.md", n));
@@ -689,13 +756,13 @@ fn print_help() {
 
 USAGE:
   tnote                            Open editor for the current window
-  tnote name <name>                Name this window's note (also renames the tmux window)
+  tnote name <name>                Name or rebind this window's note (also renames the tmux window)
+  tnote name <name> --bind [key]   Bind the current session, or one specific tmux/shell binding, to a named note
+  tnote name <name> --unbind [key] Remove all bindings for a named note, or one specific binding
   tnote show                       Print note contents inline
   tnote show --name 'proj-*'       Print all notes matching a pattern (quote the glob)
   tnote clean [--dryrun]           Remove orphaned notes and popup sessions
   tnote list / ls                  List all notes with line counts
-  tnote unbind                     Remove this window's binding to a named note
-  tnote unbind --name <name>       Remove all window bindings to a named note
   tnote path                       Print the note file path
   tnote setup                      Configure and install keybindings
   tnote uninstall                  Remove tmux and shell keybindings
@@ -710,7 +777,6 @@ TMUX COMMAND LINE (works while a process is running):
     tnote-list         List all notes
     tnote-ls           List all notes (alias)
     tnote-path         Print the note file path
-    tnote-unbind       Remove this window's binding to a named note
     tnote-help         Show this help
   Requires 'tnote setup' to install the ':tnote' command aliases.
 
@@ -718,8 +784,9 @@ NOTE TYPES:
   tmux    One note per tmux window, keyed to <session>+<window> (e.g. work+0).
           Persists until the window is closed. Cleared by 'tnote clean'.
 
-  named   Created with 'tnote name <name>'. Shared across any window that
-          points to the same name. Never auto-cleared.
+  named   A preserved note that persists even after closing a terminal session.
+          Created with 'tnote name <name>'. Multiple sessions can share a note
+          by using the same name.
 
   shell   One note per shell session (parent PID), used outside tmux.
           Cleared by 'tnote clean' once the shell process exits.
@@ -738,7 +805,8 @@ ENVIRONMENT (configurable via 'tnote setup'):
 
 #[cfg(test)]
 mod tests {
-    use super::glob_match;
+    use super::{CURRENT_TARGET_SENTINEL, glob_match, is_digits, is_tmux_window_id, normalize_bind_target, resolve_bind_target};
+    use crate::notes::Notes;
 
     #[test]
     fn glob_exact_match() {
@@ -770,5 +838,43 @@ mod tests {
     fn glob_star_only() {
         assert!(glob_match("*", "anything"));
         assert!(glob_match("*", ""));
+    }
+
+    #[test]
+    fn bind_digits_validation() {
+        assert!(is_digits("4242"));
+        assert!(!is_digits(""));
+        assert!(!is_digits("42a"));
+    }
+
+    #[test]
+    fn bind_tmux_window_id_validation() {
+        assert!(is_tmux_window_id("$255+@278"));
+        assert!(!is_tmux_window_id("255+@278"));
+        assert!(!is_tmux_window_id("$255+278"));
+        assert!(!is_tmux_window_id("$abc+@278"));
+    }
+
+    #[test]
+    fn bind_target_normalization_accepts_supported_forms() {
+        assert_eq!(normalize_bind_target("4242").unwrap(), "shell-4242");
+        assert_eq!(normalize_bind_target("shell-4242").unwrap(), "shell-4242");
+        assert_eq!(normalize_bind_target("$255+@278").unwrap(), "tmux-$255+@278");
+        assert_eq!(normalize_bind_target("tmux-$255+@278").unwrap(), "tmux-$255+@278");
+    }
+
+    #[test]
+    fn bind_target_normalization_rejects_invalid_forms() {
+        assert!(normalize_bind_target("not-a-key").is_err());
+        assert!(normalize_bind_target("shell-notapid").is_err());
+        assert!(normalize_bind_target("tmux-$255+278").is_err());
+    }
+
+    #[test]
+    fn resolve_bind_target_uses_current_key_for_boolean_flag() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = Notes::new(tmp.path().to_path_buf());
+        let expected = super::current_note(&notes).0;
+        assert_eq!(resolve_bind_target(&notes, Some(CURRENT_TARGET_SENTINEL)).unwrap(), expected);
     }
 }

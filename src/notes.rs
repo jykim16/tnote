@@ -270,6 +270,23 @@ impl Notes {
         Ok(Some(name))
     }
 
+    /// Remove the .link binding for a single key, but only if it points to the given named note.
+    /// Returns true when removed, false when the key is not bound to that note.
+    pub fn unbind_named_key(&self, name: &str, key: &str) -> std::io::Result<bool> {
+        let link = self.meta_dir().join(format!("{}.link", key));
+        if !link.exists() {
+            return Ok(false);
+        }
+
+        let target = fs::read_to_string(&link).unwrap_or_default();
+        if target.trim() != name {
+            return Ok(false);
+        }
+
+        fs::remove_file(&link)?;
+        Ok(true)
+    }
+
     /// Remove all .link bindings pointing to a named note.
     /// Returns the list of keys that were unbound.
     pub fn unbind_named(&self, name: &str) -> std::io::Result<Vec<String>> {
@@ -554,6 +571,24 @@ mod tests {
         assert!(!notes.meta_dir().join("tmux-$1+@3.link").exists());
         // Unrelated link untouched
         assert!(notes.meta_dir().join("tmux-$1+@5.link").exists());
+    }
+
+    #[test]
+    fn unbind_named_key_removes_matching_link() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(notes.meta_dir().join("tmux-$1+@3.link"), "work").unwrap();
+        assert!(notes.unbind_named_key("work", "tmux-$1+@3").unwrap());
+        assert!(!notes.meta_dir().join("tmux-$1+@3.link").exists());
+    }
+
+    #[test]
+    fn unbind_named_key_keeps_non_matching_link() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::write(notes.meta_dir().join("tmux-$1+@3.link"), "other").unwrap();
+        assert!(!notes.unbind_named_key("work", "tmux-$1+@3").unwrap());
+        assert!(notes.meta_dir().join("tmux-$1+@3.link").exists());
     }
 
     // ── cleanup_orphaned ──────────────────────────────────────────────────────

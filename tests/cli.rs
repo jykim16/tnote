@@ -162,6 +162,140 @@ fn name_output_says_named() {
     assert!(out.contains("testname"));
 }
 
+#[test]
+fn name_bind_accepts_tmux_window_key() {
+    let dir = TempDir::new().unwrap();
+    assert!(exit_ok(tnote(dir.path()).args(["name", "boundproj", "--bind", "$9+@17"])));
+    let named = dir.path().join("named-boundproj.md");
+    assert!(named.exists());
+    let link = dir.path().join("meta").join("tmux-$9+@17.link");
+    assert_eq!(fs::read_to_string(link).unwrap(), "boundproj");
+}
+
+#[test]
+fn name_bind_boolean_uses_current_shell_key() {
+    let dir = TempDir::new().unwrap();
+    let path_out = stdout(tnote(dir.path()).arg("path"));
+    let key = Path::new(path_out.trim())
+        .file_stem()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    assert!(exit_ok(tnote(dir.path()).args(["name", "boundproj", "--bind"])));
+    let link = dir.path().join("meta").join(format!("{}.link", key));
+    assert_eq!(fs::read_to_string(link).unwrap(), "boundproj");
+}
+
+#[test]
+fn name_bind_accepts_prefixed_tmux_window_key() {
+    let dir = TempDir::new().unwrap();
+    assert!(exit_ok(tnote(dir.path()).args(["name", "boundproj", "--bind", "tmux-$9+@17"])));
+    let link = dir.path().join("meta").join("tmux-$9+@17.link");
+    assert_eq!(fs::read_to_string(link).unwrap(), "boundproj");
+}
+
+#[test]
+fn name_bind_accepts_shell_pid() {
+    let dir = TempDir::new().unwrap();
+    assert!(exit_ok(tnote(dir.path()).args(["name", "shellproj", "--bind", "4242"])));
+    let named = dir.path().join("named-shellproj.md");
+    assert!(named.exists());
+    let link = dir.path().join("meta").join("shell-4242.link");
+    assert_eq!(fs::read_to_string(link).unwrap(), "shellproj");
+}
+
+#[test]
+fn name_bind_accepts_prefixed_shell_pid() {
+    let dir = TempDir::new().unwrap();
+    assert!(exit_ok(tnote(dir.path()).args(["name", "shellproj", "--bind", "shell-4242"])));
+    let link = dir.path().join("meta").join("shell-4242.link");
+    assert_eq!(fs::read_to_string(link).unwrap(), "shellproj");
+}
+
+#[test]
+fn name_bind_rejects_invalid_target() {
+    let dir = TempDir::new().unwrap();
+    let output = tnote(dir.path())
+        .args(["name", "broken", "--bind", "not-a-key"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(err.contains("invalid bind target"));
+}
+
+#[test]
+fn name_bind_rejects_invalid_prefixed_targets() {
+    let dir = TempDir::new().unwrap();
+
+    let bad_tmux = tnote(dir.path())
+        .args(["name", "broken", "--bind", "tmux-$9+17"])
+        .output()
+        .unwrap();
+    assert!(!bad_tmux.status.success());
+
+    let bad_shell = tnote(dir.path())
+        .args(["name", "broken", "--bind", "shell-notapid"])
+        .output()
+        .unwrap();
+    assert!(!bad_shell.status.success());
+}
+
+#[test]
+fn name_unbind_removes_specific_tmux_binding() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("meta")).unwrap();
+    fs::write(dir.path().join("named-boundproj.md"), "data\n").unwrap();
+    fs::write(dir.path().join("meta").join("tmux-$9+@17.link"), "boundproj").unwrap();
+    fs::write(dir.path().join("meta").join("shell-4242.link"), "boundproj").unwrap();
+
+    assert!(exit_ok(tnote(dir.path()).args(["name", "boundproj", "--unbind", "$9+@17"])));
+    assert!(!dir.path().join("meta").join("tmux-$9+@17.link").exists());
+    assert!(dir.path().join("meta").join("shell-4242.link").exists());
+}
+
+#[test]
+fn name_unbind_boolean_removes_all_bindings_for_note() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("meta")).unwrap();
+    fs::write(dir.path().join("named-boundproj.md"), "data\n").unwrap();
+    fs::write(dir.path().join("meta").join("shell-4242.link"), "boundproj").unwrap();
+    fs::write(dir.path().join("meta").join("tmux-$9+@17.link"), "boundproj").unwrap();
+    fs::write(dir.path().join("meta").join("shell-9999.link"), "otherproj").unwrap();
+
+    assert!(exit_ok(tnote(dir.path()).args(["name", "boundproj", "--unbind"])));
+    assert!(!dir.path().join("meta").join("shell-4242.link").exists());
+    assert!(!dir.path().join("meta").join("tmux-$9+@17.link").exists());
+    assert!(dir.path().join("meta").join("shell-9999.link").exists());
+}
+
+#[test]
+fn name_unbind_rejects_key_bound_to_other_note() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("meta")).unwrap();
+    fs::write(dir.path().join("named-boundproj.md"), "data\n").unwrap();
+    fs::write(dir.path().join("meta").join("tmux-$9+@17.link"), "otherproj").unwrap();
+
+    let output = tnote(dir.path())
+        .args(["name", "boundproj", "--unbind", "$9+@17"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(err.contains("is not bound to 'boundproj'"));
+}
+
+#[test]
+fn name_rejects_bind_and_unbind_together() {
+    let dir = TempDir::new().unwrap();
+    let output = tnote(dir.path())
+        .args(["name", "boundproj", "--bind", "$9+@17", "--unbind", "4242"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}
+
 // ── tnote clean ───────────────────────────────────────────────────────────────
 
 #[test]
@@ -490,23 +624,22 @@ fn ls_is_alias_for_list() {
 }
 
 #[test]
-fn unbind_name_removes_link_files() {
+fn name_unbind_boolean_removes_named_note_link_files() {
     let dir = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("meta")).unwrap();
     fs::write(dir.path().join("named-myproj.md"), "data\n").unwrap();
     fs::write(dir.path().join("meta").join("tmux-work+0.link"), "myproj").unwrap();
     fs::write(dir.path().join("meta").join("tmux-work+1.link"), "myproj").unwrap();
-    assert!(exit_ok(&mut tnote(dir.path()).args(["unbind", "--name", "myproj"])));
+    assert!(exit_ok(&mut tnote(dir.path()).args(["name", "myproj", "--unbind"])));
     assert!(!dir.path().join("meta").join("tmux-work+0.link").exists());
     assert!(!dir.path().join("meta").join("tmux-work+1.link").exists());
-    // named note itself is untouched
     assert!(dir.path().join("named-myproj.md").exists());
 }
 
 #[test]
-fn unbind_name_not_bound_exits_nonzero() {
+fn name_unbind_boolean_not_bound_exits_nonzero() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("named-myproj.md"), "data\n").unwrap();
-    let status = tnote(dir.path()).args(["unbind", "--name", "myproj"]).output().unwrap().status;
+    let status = tnote(dir.path()).args(["name", "myproj", "--unbind"]).output().unwrap().status;
     assert!(!status.success());
 }

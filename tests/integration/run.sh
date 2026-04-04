@@ -43,6 +43,42 @@ tnote list | grep -q "shell" && pass "list" || fail "list"
 tnote name testproject
 tnote path | grep -q "named-testproject.md" && pass "name" || fail "name"
 
+# name --bind (tmux key from outside tmux)
+tnote name boundproject --bind '$9+@17'
+[ -f "$TNOTE_DIR/meta/tmux-\$9+@17.link" ] && pass "name --bind writes tmux link" || fail "name --bind writes tmux link"
+grep -q "boundproject" "$TNOTE_DIR/meta/tmux-\$9+@17.link" && pass "name --bind stores note name" || fail "name --bind stores note name"
+tnote show -n boundproject >/dev/null && pass "name --bind creates named note" || fail "name --bind creates named note"
+
+# name --bind (boolean current shell binding)
+CURRENT_KEY="shell-$$"
+tnote name currentbound --bind
+[ -f "$TNOTE_DIR/meta/${CURRENT_KEY}.link" ] && pass "name --bind boolean writes current link" || fail "name --bind boolean writes current link"
+grep -q "currentbound" "$TNOTE_DIR/meta/${CURRENT_KEY}.link" && pass "name --bind boolean stores current note name" || fail "name --bind boolean stores current note name"
+
+# name --bind (shell pid from outside tmux)
+tnote name shellbound --bind 4242
+[ -f "$TNOTE_DIR/meta/shell-4242.link" ] && pass "name --bind writes shell link" || fail "name --bind writes shell link"
+grep -q "shellbound" "$TNOTE_DIR/meta/shell-4242.link" && pass "name --bind stores shell note name" || fail "name --bind stores shell note name"
+
+# name --unbind (specific key from outside tmux)
+tnote name boundproject --unbind '$9+@17'
+[ ! -f "$TNOTE_DIR/meta/tmux-\$9+@17.link" ] && pass "name --unbind removes tmux link" || fail "name --unbind removes tmux link"
+[ -f "$TNOTE_DIR/meta/shell-4242.link" ] && pass "name --unbind keeps other links" || fail "name --unbind keeps other links"
+
+# name --unbind (boolean removes all links for the note)
+tnote name currentbound --bind
+tnote name currentbound --bind 9999
+[ -f "$TNOTE_DIR/meta/${CURRENT_KEY}.link" ] && [ -f "$TNOTE_DIR/meta/shell-9999.link" ] && pass "name --unbind boolean setup" || fail "name --unbind boolean setup"
+tnote name currentbound --unbind
+[ ! -f "$TNOTE_DIR/meta/${CURRENT_KEY}.link" ] && [ ! -f "$TNOTE_DIR/meta/shell-9999.link" ] && pass "name --unbind boolean removes all note links" || fail "name --unbind boolean removes all note links"
+[ -f "$TNOTE_DIR/meta/shell-4242.link" ] && pass "name --unbind boolean keeps other note links" || fail "name --unbind boolean keeps other note links"
+
+# name --bind (invalid format)
+! tnote name broken --bind not-a-key 2>/dev/null && pass "name --bind invalid target exits nonzero" || fail "name --bind invalid target exits nonzero"
+
+# name --unbind (wrong note)
+! tnote name wrongnote --unbind 4242 2>/dev/null && pass "name --unbind wrong note exits nonzero" || fail "name --unbind wrong note exits nonzero"
+
 # clean --dryrun
 echo "stale" > "$TNOTE_DIR/shell-9999999.md"
 tnote clean --dryrun | grep -q "would remove" && pass "clean --dryrun" || fail "clean --dryrun"

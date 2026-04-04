@@ -186,8 +186,7 @@ pub fn run(config: &Config) {
              set -s command-alias[104] \"tnote-clean=run-shell 'tnote clean'\"\n\
              set -s command-alias[105] \"tnote-help=run-shell 'tnote help'\"\n\
              set -s command-alias[106] \"tnote-name=run-shell 'tnote name'\"\n\
-             set -s command-alias[107] \"tnote-ls=run-shell 'tnote ls'\"\n\
-             set -s command-alias[108] \"tnote-unbind=run-shell 'tnote unbind'\"\n",
+             set -s command-alias[107] \"tnote-ls=run-shell 'tnote ls'\"\n",
             key = key,
         );
 
