@@ -2,11 +2,11 @@ use tnote::{config, editor, install, name_picker, notes, tmux};
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use config::Config;
-use std::io::{self, Write};
 use notes::Notes;
-use owo_colors::{OwoColorize, Style, Stream::Stdout, Stream::Stderr};
+use owo_colors::{OwoColorize, Stream::Stderr, Stream::Stdout, Style};
 use std::fs;
-use std::path::PathBuf;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
 const CURRENT_TARGET_SENTINEL: &str = "__current__";
 
@@ -20,22 +20,26 @@ enum ClearScope {
     Tmux,
     /// Remove all notes
     All,
-
 }
 
 impl From<ClearScope> for notes::ClearScope {
     fn from(s: ClearScope) -> Self {
         match s {
             ClearScope::Unprefixed => notes::ClearScope::Unprefixed,
-            ClearScope::Named      => notes::ClearScope::Named,
-            ClearScope::Tmux       => notes::ClearScope::Tmux,
-            ClearScope::All        => notes::ClearScope::All,
+            ClearScope::Named => notes::ClearScope::Named,
+            ClearScope::Tmux => notes::ClearScope::Tmux,
+            ClearScope::All => notes::ClearScope::All,
         }
     }
 }
 
 #[derive(Parser)]
-#[command(name = "tnote", about = "Terminal Notepad", disable_help_subcommand = true, version)]
+#[command(
+    name = "tnote",
+    about = "Terminal Notepad",
+    disable_help_subcommand = true,
+    version
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
@@ -95,7 +99,11 @@ enum Cmd {
         name: Option<String>,
     },
     /// Configure editor, key binding, and dimensions, then install keybindings
-    Setup,
+    Setup {
+        /// Include advanced options like the note renderer and list annotations
+        #[arg(long)]
+        advanced: bool,
+    },
     /// Remove tmux and shell keybindings
     Uninstall,
     /// Show usage
@@ -111,15 +119,10 @@ enum Cmd {
     CompleteNamedNotes,
     /// Internal: interactive tmux popup picker for note naming
     #[command(name = "__name-picker", hide = true)]
-    NamePicker {
-        window_key: Option<String>,
-    },
+    NamePicker { window_key: Option<String> },
     /// Internal: name a specific tmux target from tmux command-prompt
     #[command(name = "__name-target", hide = true)]
-    NameTarget {
-        window_key: String,
-        name: String,
-    },
+    NameTarget { window_key: String, name: String },
     /// Internal: run editor inline when already inside a tmux display-popup
     #[command(hide = true)]
     Popup { window_key: Option<String> },
@@ -131,15 +134,38 @@ fn main() {
     let notes = Notes::new(config.dir.clone());
 
     if let Err(e) = notes.ensure_dir() {
-        eprintln!("tnote: failed to create notes dir {}: {}", config.dir.display(), e);
+        eprintln!(
+            "tnote: failed to create notes dir {}: {}",
+            config.dir.display(),
+            e
+        );
         std::process::exit(1);
     }
 
     match &cli.command {
         None => cmd_open(&config, &notes, cli.name.as_deref()),
-        Some(Cmd::Name { name, bind, unbind }) => cmd_name(&config, &notes, name.as_deref(), bind.as_deref(), unbind.as_deref()),
-        Some(Cmd::Show { name }) => cmd_show(&notes, name.as_deref()),
-        Some(Cmd::Clean { all, name, archive, unarchive, dryrun }) => cmd_clean(&notes, all.clone(), name.as_deref(), *archive, *unarchive, *dryrun),
+        Some(Cmd::Name { name, bind, unbind }) => cmd_name(
+            &config,
+            &notes,
+            name.as_deref(),
+            bind.as_deref(),
+            unbind.as_deref(),
+        ),
+        Some(Cmd::Show { name }) => cmd_show(&config, &notes, name.as_deref()),
+        Some(Cmd::Clean {
+            all,
+            name,
+            archive,
+            unarchive,
+            dryrun,
+        }) => cmd_clean(
+            &notes,
+            all.clone(),
+            name.as_deref(),
+            *archive,
+            *unarchive,
+            *dryrun,
+        ),
         Some(Cmd::List { archive }) => {
             if *archive {
                 cmd_list_archive(&notes);
@@ -148,13 +174,14 @@ fn main() {
             }
         }
         Some(Cmd::Path { name }) => cmd_path(&notes, name.as_deref()),
-        Some(Cmd::Setup) => cmd_setup(&config),
+        Some(Cmd::Setup { advanced }) => cmd_setup(&config, *advanced),
         Some(Cmd::Uninstall) => install::uninstall(&config),
         Some(Cmd::Help) => print_help(),
         Some(Cmd::Completions { shell }) => cmd_completions(*shell),
         Some(Cmd::CompleteNamedNotes) => cmd_complete_named_notes(&notes),
         Some(Cmd::NamePicker { window_key }) => {
-            let key = window_key.as_deref()
+            let key = window_key
+                .as_deref()
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .or_else(|| std::env::var("TNOTE_WINDOW_KEY").ok());
@@ -162,7 +189,8 @@ fn main() {
         }
         Some(Cmd::NameTarget { window_key, name }) => cmd_name_target(&notes, window_key, name),
         Some(Cmd::Popup { window_key }) => {
-            let key = window_key.as_deref()
+            let key = window_key
+                .as_deref()
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .or_else(|| std::env::var("TNOTE_WINDOW_KEY").ok())
@@ -205,7 +233,9 @@ fn cmd_open(config: &Config, notes: &Notes, name: Option<&str>) {
     }
 
     if tmux::is_in_tmux() && tmux::is_popup_session() {
-        let _ = std::process::Command::new("tmux").args(["detach-client"]).status();
+        let _ = std::process::Command::new("tmux")
+            .args(["detach-client"])
+            .status();
         return;
     }
 
@@ -227,7 +257,10 @@ fn cmd_open(config: &Config, notes: &Notes, name: Option<&str>) {
 
     if let Err(e) = result {
         if e.kind() == std::io::ErrorKind::NotFound {
-            eprintln!("tnote: editor '{}' not found — run 'tnote setup' to configure", config.editor);
+            eprintln!(
+                "tnote: editor '{}' not found — run 'tnote setup' to configure",
+                config.editor
+            );
         } else {
             eprintln!("tnote: {}", e);
         }
@@ -243,13 +276,14 @@ fn cmd_popup_inline(_config: &Config, notes: &Notes, key: &str) {
     }
 
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
-    let status = std::process::Command::new(&editor)
-        .arg(&file)
-        .status();
+    let status = std::process::Command::new(&editor).arg(&file).status();
 
     if let Err(e) = status {
         if e.kind() == std::io::ErrorKind::NotFound {
-            eprintln!("tnote: editor '{}' not found — run 'tnote setup' to configure", editor);
+            eprintln!(
+                "tnote: editor '{}' not found — run 'tnote setup' to configure",
+                editor
+            );
         } else {
             eprintln!("tnote: failed to run {}: {}", editor, e);
         }
@@ -307,7 +341,13 @@ fn resolve_bind_target(notes: &Notes, target: Option<&str>) -> Result<String, St
     }
 }
 
-fn cmd_name(_config: &Config, notes: &Notes, name: Option<&str>, bind: Option<&str>, unbind: Option<&str>) {
+fn cmd_name(
+    _config: &Config,
+    notes: &Notes,
+    name: Option<&str>,
+    bind: Option<&str>,
+    unbind: Option<&str>,
+) {
     let Some(name) = name else {
         if tmux::is_in_tmux() {
             let window_key = current_note(notes).0;
@@ -398,8 +438,12 @@ fn cmd_name_picker(notes: &Notes, window_key: Option<&str>) {
         Ok(Some(name_picker::Selection::Existing(name))) => {
             cmd_name_target(notes, window_key, &name);
         }
-        Ok(Some(name_picker::Selection::PromptNew)) => {
-            tmux::prompt_name_for_target(window_key);
+        Ok(Some(name_picker::Selection::NewName(name))) => {
+            if name.trim().is_empty() {
+                tmux::prompt_name_for_target(window_key);
+            } else {
+                cmd_name_target(notes, window_key, name.trim());
+            }
         }
         Ok(None) => (),
         Err(e) => {
@@ -428,21 +472,97 @@ fn cmd_name_target(notes: &Notes, window_key: &str, name: &str) {
     }
 }
 
-fn show_named_note(notes: &Notes, n: &str) {
+fn print_show_header(label: &str, file: &Path) {
+    println!(
+        "{}",
+        format!("── {}: {} ──", label, file.display())
+            .if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold()))
+    );
+}
+
+fn print_show_footer() {
+    println!(
+        "{}",
+        "──────────────────────".if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold()))
+    );
+}
+
+fn print_show_plain(file: &Path) {
+    match fs::read_to_string(file) {
+        Ok(content) => print!("{}", content),
+        Err(e) => eprintln!("tnote show: {}", e.if_supports_color(Stderr, |t| t.red())),
+    }
+}
+
+fn try_print_with_bat(file: &Path) -> io::Result<()> {
+    let status = std::process::Command::new("bat")
+        .args(["--paging=never", "--style=plain", "--language=markdown"])
+        .arg(file)
+        .status()?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "bat exited with status {}",
+            status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "signal".to_string())
+        )))
+    }
+}
+
+fn print_show_content(config: &Config, label: &str, file: &Path) {
+    print_show_header(label, file);
+
+    let rendered = match config.renderer.as_deref() {
+        Some("bat") => {
+            let _ = io::stdout().flush();
+            match try_print_with_bat(file) {
+                Ok(()) => true,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    eprintln!(
+                        "tnote show: renderer 'bat' not found; falling back to plain output"
+                    );
+                    false
+                }
+                Err(e) => {
+                    eprintln!("tnote show: bat renderer failed ({}); falling back to plain output", e);
+                    false
+                }
+            }
+        }
+        Some(renderer) => {
+            eprintln!(
+                "tnote show: unknown renderer '{}'; falling back to plain output",
+                renderer
+            );
+            false
+        }
+        None => false,
+    };
+
+    if !rendered {
+        print_show_plain(file);
+    }
+
+    print_show_footer();
+}
+
+fn show_named_note(config: &Config, notes: &Notes, n: &str) {
     let file = notes.dir.join(format!("named-{}.md", n));
     if !file.exists() {
         eprintln!("tnote show: named note '{}' not found", n);
         std::process::exit(1);
     }
     if file.metadata().map(|m| m.len() > 0).unwrap_or(false) {
-        println!("{}", format!("── {}: {} ──", n, file.display()).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
-        match fs::read_to_string(&file) {
-            Ok(content) => print!("{}", content),
-            Err(e) => eprintln!("tnote show: {}", e.if_supports_color(Stderr, |t| t.red())),
-        }
-        println!("{}", "──────────────────────".if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
+        print_show_content(config, n, &file);
     } else {
-        println!("tnote show: (empty) [{}]", n.if_supports_color(Stdout, |t| t.dimmed()));
+        println!(
+            "tnote show: (empty) [{}]",
+            n.if_supports_color(Stdout, |t| t.dimmed())
+        );
     }
 }
 
@@ -462,10 +582,14 @@ fn glob_match(pattern: &str, text: &str) -> bool {
         }
     }
     let last = parts[parts.len() - 1];
-    if last.is_empty() { true } else { text[pos..].contains(last) && text.ends_with(last) }
+    if last.is_empty() {
+        true
+    } else {
+        text[pos..].contains(last) && text.ends_with(last)
+    }
 }
 
-fn cmd_show(notes: &Notes, name: Option<&str>) {
+fn cmd_show(config: &Config, notes: &Notes, name: Option<&str>) {
     if let Some(n) = name {
         if n.contains('*') {
             let mut matches: Vec<String> = fs::read_dir(&notes.dir)
@@ -476,7 +600,11 @@ fn cmd_show(notes: &Notes, name: Option<&str>) {
                     let fname = e.file_name();
                     let s = fname.to_string_lossy();
                     let stem = s.strip_prefix("named-")?.strip_suffix(".md")?;
-                    if glob_match(n, stem) { Some(stem.to_string()) } else { None }
+                    if glob_match(n, stem) {
+                        Some(stem.to_string())
+                    } else {
+                        None
+                    }
                 })
                 .collect();
             matches.sort();
@@ -485,11 +613,11 @@ fn cmd_show(notes: &Notes, name: Option<&str>) {
                 std::process::exit(1);
             }
             for note_name in &matches {
-                show_named_note(notes, note_name);
+                show_named_note(config, notes, note_name);
             }
             return;
         }
-        show_named_note(notes, n);
+        show_named_note(config, notes, n);
         return;
     }
 
@@ -503,30 +631,41 @@ fn cmd_show(notes: &Notes, name: Option<&str>) {
     candidates.push(notes::shell_session_key());
 
     // Expand any key that has a .link into the named key first.
-    let resolved: Vec<(String, String, PathBuf)> = candidates.into_iter().map(|k| {
-        let label = notes.label_for_key(&k);
-        let file  = notes.file_for_key(&k);
-        (k, label, file)
-    }).collect();
+    let resolved: Vec<(String, String, PathBuf)> = candidates
+        .into_iter()
+        .map(|k| {
+            let label = notes.label_for_key(&k);
+            let file = notes.file_for_key(&k);
+            (k, label, file)
+        })
+        .collect();
 
     for (_, label, file) in &resolved {
         let non_empty = file.exists() && file.metadata().map(|m| m.len() > 0).unwrap_or(false);
         if non_empty {
-            println!("{}", format!("── {}: {} ──", label, file.display()).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
-            match fs::read_to_string(file) {
-                Ok(content) => print!("{}", content),
-                Err(e) => eprintln!("tnote show: {}", e.if_supports_color(Stderr, |t| t.red())),
-            }
-            println!("{}", "──────────────────────".if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
+            print_show_content(config, label, file);
             return;
         }
     }
 
-    let label = resolved.first().map(|(_, l, _)| l.as_str()).unwrap_or("unknown");
-    println!("tnote show: (empty) [{}]", label.if_supports_color(Stdout, |t| t.dimmed()));
+    let label = resolved
+        .first()
+        .map(|(_, l, _)| l.as_str())
+        .unwrap_or("unknown");
+    println!(
+        "tnote show: (empty) [{}]",
+        label.if_supports_color(Stdout, |t| t.dimmed())
+    );
 }
 
-fn cmd_clean(notes: &Notes, scope: Option<ClearScope>, named: Option<&str>, archive: bool, unarchive: bool, dry_run: bool) {
+fn cmd_clean(
+    notes: &Notes,
+    scope: Option<ClearScope>,
+    named: Option<&str>,
+    archive: bool,
+    unarchive: bool,
+    dry_run: bool,
+) {
     if let Some(name) = named {
         let result = if unarchive {
             notes.unarchive_named(name, dry_run)
@@ -538,9 +677,25 @@ fn cmd_clean(notes: &Notes, scope: Option<ClearScope>, named: Option<&str>, arch
         match result {
             Ok(true) => {
                 let verb = if dry_run {
-                    if unarchive { "would unarchive" } else if archive { "would archive" } else { "would remove" }
-                } else if unarchive { "unarchived" } else if archive { "archived" } else { "removed" };
-                println!("tnote clean: {} named note '{}'", verb, name.if_supports_color(Stdout, |t| t.yellow()));
+                    if unarchive {
+                        "would unarchive"
+                    } else if archive {
+                        "would archive"
+                    } else {
+                        "would remove"
+                    }
+                } else if unarchive {
+                    "unarchived"
+                } else if archive {
+                    "archived"
+                } else {
+                    "removed"
+                };
+                println!(
+                    "tnote clean: {} named note '{}'",
+                    verb,
+                    name.if_supports_color(Stdout, |t| t.yellow())
+                );
             }
             Ok(false) => {
                 eprintln!("tnote clean: named note '{}' not found", name);
@@ -561,7 +716,11 @@ fn cmd_clean(notes: &Notes, scope: Option<ClearScope>, named: Option<&str>, arch
         Ok(removed) if !removed.is_empty() => {
             let verb = if dry_run { "would remove" } else { "removed" };
             for key in &removed {
-                println!("tnote clean: {} note {}", verb, key.if_supports_color(Stdout, |t| t.yellow()));
+                println!(
+                    "tnote clean: {} note {}",
+                    verb,
+                    key.if_supports_color(Stdout, |t| t.yellow())
+                );
             }
             any = true;
         }
@@ -575,12 +734,19 @@ fn cmd_clean(notes: &Notes, scope: Option<ClearScope>, named: Option<&str>, arch
     let sessions = tmux::cleanup_popup_sessions(&notes.dir, dry_run);
     for s in &sessions {
         let verb = if dry_run { "would kill" } else { "killed" };
-        println!("tnote clean: {} popup session {}", verb, s.if_supports_color(Stdout, |t| t.yellow()));
+        println!(
+            "tnote clean: {} popup session {}",
+            verb,
+            s.if_supports_color(Stdout, |t| t.yellow())
+        );
         any = true;
     }
 
     if !any {
-        println!("tnote clean: {}", "nothing to clean up".if_supports_color(Stdout, |t| t.green()));
+        println!(
+            "tnote clean: {}",
+            "nothing to clean up".if_supports_color(Stdout, |t| t.green())
+        );
     }
 }
 
@@ -591,9 +757,9 @@ fn run_annotation_cmd(cmd_template: &str, path: &std::path::Path) -> String {
         .arg(&cmd)
         .output();
     match output {
-        Ok(o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout).trim_end_matches('\n').to_string()
-        }
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .trim_end_matches('\n')
+            .to_string(),
         _ => String::new(),
     }
 }
@@ -608,72 +774,92 @@ fn cmd_list(notes: &Notes, config: &Config) {
             }
 
             struct Row {
-                category:      String,
-                plain_label:   String,
+                category: String,
+                plain_label: String,
                 colored_label: String,
-                annotation:    String,
-                marker:        String,
-                sources:       Vec<String>,
+                annotation: String,
+                marker: String,
+                sources: Vec<String>,
             }
 
             // Build all rows up front so we can compute global alignment widths.
-            let rows: Vec<Row> = list.iter().map(|(cat, display, note_sources, lines, path)| {
-                let shown = if cat == "shell" {
-                    display.trim_start_matches("shell-").to_string()
-                } else {
-                    display.clone()
-                };
-                let sources: Vec<String> = note_sources.iter().map(|k| {
-                    if k.starts_with("tmux-") {
-                        let label = tmux::window_display_label(k)
-                            .unwrap_or_else(|| k.strip_prefix("tmux-").unwrap_or(k).to_string());
-                        format!("tmux - {}", label)
+            let rows: Vec<Row> = list
+                .iter()
+                .map(|(cat, display, note_sources, lines, path)| {
+                    let shown = if cat == "shell" {
+                        display.trim_start_matches("shell-").to_string()
                     } else {
-                        format!("shell - {}", k.strip_prefix("shell-").unwrap_or(k))
+                        display.clone()
+                    };
+                    let sources: Vec<String> = note_sources
+                        .iter()
+                        .map(|k| {
+                            if k.starts_with("tmux-") {
+                                let label = tmux::window_display_label(k).unwrap_or_else(|| {
+                                    k.strip_prefix("tmux-").unwrap_or(k).to_string()
+                                });
+                                format!("tmux - {}", label)
+                            } else {
+                                format!("shell - {}", k.strip_prefix("shell-").unwrap_or(k))
+                            }
+                        })
+                        .collect();
+                    let is_current = *path == current_file;
+                    let colored_name = if is_current {
+                        format!(
+                            "{}",
+                            shown.if_supports_color(Stdout, |t| t.style(Style::new().bold()))
+                        )
+                    } else {
+                        shown.clone()
+                    };
+                    let marker = if is_current {
+                        format!(
+                            " {}",
+                            "◀".if_supports_color(Stdout, |t| t.style(Style::new().green().bold()))
+                        )
+                    } else {
+                        String::new()
+                    };
+                    let annotation = if let Some(ref cmd) = config.ls_annotation {
+                        run_annotation_cmd(cmd, path)
+                    } else {
+                        format!("{} lines", lines)
+                    };
+                    Row {
+                        category: cat.clone(),
+                        plain_label: shown,
+                        colored_label: colored_name,
+                        annotation,
+                        marker,
+                        sources,
                     }
-                }).collect();
-                let is_current = *path == current_file;
-                let colored_name = if is_current {
-                    format!("{}", shown.if_supports_color(Stdout, |t| t.style(Style::new().bold())))
-                } else {
-                    shown.clone()
-                };
-                let marker = if is_current {
-                    format!(" {}", "◀".if_supports_color(Stdout, |t| t.style(Style::new().green().bold())))
-                } else {
-                    String::new()
-                };
-                let annotation = if let Some(ref cmd) = config.ls_annotation {
-                    run_annotation_cmd(cmd, path)
-                } else {
-                    format!("{} lines", lines)
-                };
-                Row {
-                    category:      cat.clone(),
-                    plain_label:   shown,
-                    colored_label: colored_name,
-                    annotation,
-                    marker,
-                    sources,
-                }
-            }).collect();
+                })
+                .collect();
 
-            let max_width        = rows.iter().map(|r| r.plain_label.len()).max().unwrap_or(0);
+            let max_width = rows.iter().map(|r| r.plain_label.len()).max().unwrap_or(0);
             let annotation_width = rows.iter().map(|r| r.annotation.len()).max().unwrap_or(0);
 
             let categories = [
                 ("named", "named"),
-                ("tmux",  "tmux (session+window)"),
+                ("tmux", "tmux (session+window)"),
                 ("shell", "shell (pid)"),
                 ("other", "other"),
             ];
             for (cat_key, cat_label) in categories {
                 let cat_rows: Vec<_> = rows.iter().filter(|r| r.category == cat_key).collect();
-                if cat_rows.is_empty() { continue; }
-                println!("{}", format!("{}:", cat_label).if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold())));
+                if cat_rows.is_empty() {
+                    continue;
+                }
+                println!(
+                    "{}",
+                    format!("{}:", cat_label)
+                        .if_supports_color(Stdout, |t| t.style(Style::new().cyan().bold()))
+                );
                 for row in cat_rows {
                     let padding = max_width - row.plain_label.len();
-                    println!("  {}{}  {:width$}{}",
+                    println!(
+                        "  {}{}  {:width$}{}",
                         row.colored_label,
                         " ".repeat(padding),
                         row.annotation,
@@ -681,7 +867,11 @@ fn cmd_list(notes: &Notes, config: &Config) {
                         width = annotation_width,
                     );
                     for source in &row.sources {
-                        println!("    {} {}", "↳".if_supports_color(Stdout, |t| t.dimmed()), source.if_supports_color(Stdout, |t| t.dimmed()));
+                        println!(
+                            "    {} {}",
+                            "↳".if_supports_color(Stdout, |t| t.dimmed()),
+                            source.if_supports_color(Stdout, |t| t.dimmed())
+                        );
                     }
                 }
             }
@@ -706,8 +896,14 @@ fn cmd_list_archive(notes: &Notes) {
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            let name = name.strip_prefix("named-")?.strip_suffix(".md")?.to_string();
-            let lines = std::fs::read_to_string(e.path()).unwrap_or_default().lines().count();
+            let name = name
+                .strip_prefix("named-")?
+                .strip_suffix(".md")?
+                .to_string();
+            let lines = std::fs::read_to_string(e.path())
+                .unwrap_or_default()
+                .lines()
+                .count();
             Some((name, lines))
         })
         .collect();
@@ -717,9 +913,17 @@ fn cmd_list_archive(notes: &Notes) {
     }
     items.sort();
     let max_w = items.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
-    println!("{}", "archived:".if_supports_color(Stdout, |t| t.style(owo_colors::Style::new().cyan().bold())));
+    println!(
+        "{}",
+        "archived:".if_supports_color(Stdout, |t| t.style(owo_colors::Style::new().cyan().bold()))
+    );
     for (name, lines) in &items {
-        println!("  {}{}  {} lines", name, " ".repeat(max_w - name.len()), lines);
+        println!(
+            "  {}{}  {} lines",
+            name,
+            " ".repeat(max_w - name.len()),
+            lines
+        );
     }
 }
 
@@ -875,23 +1079,39 @@ complete -c tnote -n '__fish_seen_subcommand_from name; and not __fish_seen_subc
 "#
 }
 
-fn cmd_setup(config: &Config) {
+fn cmd_setup(config: &Config, advanced: bool) {
     println!("tnote setup\n");
 
-    let editor        = prompt_editor(&config.editor);
-    let key           = prompt("Key (tmux: prefix+?, shell: Ctrl+?)", &config.key);
-    let width         = prompt("Popup width  (e.g. 100%, 80)", &config.width);
-    let height        = prompt("Popup height (e.g. 50%, 22)",  &config.height);
-    let annotation_default = config.ls_annotation.as_deref().unwrap_or("");
-    let annotation_raw = prompt("ls annotation (e.g. head -1 {})", annotation_default);
-    let ls_annotation = if annotation_raw.is_empty() { None } else { Some(annotation_raw) };
+    let editor = prompt_editor(&config.editor);
+    let key = prompt("Key (tmux: prefix+?, shell: Ctrl+?)", &config.key);
+    let width = prompt("Popup width  (e.g. 100%, 80)", &config.width);
+    let height = prompt("Popup height (e.g. 50%, 22)", &config.height);
+    let (renderer, ls_annotation) = if advanced {
+        let renderer = prompt_optional(
+            "Renderer (e.g. bat; blank for plain output)",
+            config.renderer.as_deref(),
+        );
+
+        let annotation_default = config.ls_annotation.as_deref().unwrap_or("");
+        let annotation_raw = prompt("ls annotation (e.g. head -1 {})", annotation_default);
+        let ls_annotation = if annotation_raw.is_empty() {
+            None
+        } else {
+            Some(annotation_raw)
+        };
+
+        (renderer, ls_annotation)
+    } else {
+        (config.renderer.clone(), config.ls_annotation.clone())
+    };
 
     let new_config = Config {
-        dir:    config.dir.clone(),
+        dir: config.dir.clone(),
         editor,
         key,
         width,
         height,
+        renderer,
         ls_annotation,
     };
 
@@ -904,8 +1124,11 @@ fn cmd_setup(config: &Config) {
 }
 
 fn prompt_editor(current: &str) -> String {
-    let candidates = ["nvim", "vim", "vi", "nano", "emacs", "hx", "micro", "kak", "helix"];
-    let available: Vec<&str> = candidates.iter()
+    let candidates = [
+        "nvim", "vim", "vi", "nano", "emacs", "hx", "micro", "kak", "helix",
+    ];
+    let available: Vec<&str> = candidates
+        .iter()
         .copied()
         .filter(|e| install::which(e))
         .collect();
@@ -948,7 +1171,26 @@ fn prompt(label: &str, default: &str) -> String {
     let mut input = String::new();
     let _ = io::stdin().read_line(&mut input);
     let trimmed = input.trim();
-    if trimmed.is_empty() { default.to_string() } else { trimmed.to_string() }
+    if trimmed.is_empty() {
+        default.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn prompt_optional(label: &str, current: Option<&str>) -> Option<String> {
+    let shown = current.unwrap_or("");
+    print!("  {:<18} [{}]: ", label, shown);
+    let _ = io::stdout().flush();
+    let mut input = String::new();
+    let _ = io::stdin().read_line(&mut input);
+    let trimmed = input.trim();
+
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 fn print_help() {
@@ -965,7 +1207,7 @@ USAGE:
   tnote clean [--dryrun]           Remove orphaned notes and popup sessions
   tnote list / ls                  List all notes with line counts
   tnote path                       Print the note file path
-  tnote setup                      Configure and install keybindings
+  tnote setup [--advanced]         Configure and install keybindings
   tnote uninstall                  Remove tmux and shell keybindings
   tnote help                       Show this help
 
@@ -997,16 +1239,23 @@ ENVIRONMENT (configurable via 'tnote setup'):
   TNOTE_KEY              Key binding             (default: t, tmux: prefix+t, shell: Ctrl+t)
   TNOTE_WIDTH            Popup width  (default: 100%, e.g. 80 or 75%)
   TNOTE_HEIGHT           Popup height (default: 50%,  e.g. 22 or 40%)
+  TNOTE_RENDERER         Optional renderer for 'tnote show' (experimental: 'bat')
   TNOTE_LS_ANNOTATION    Shell command shown next to each note in 'tnote ls'.
                          Use {{}} as the note file path placeholder.
                          Default: line count.
-                         Example: ls_annotation=head -1 {{}} (show first line)"
+                         Example: ls_annotation=head -1 {{}} (show first line)
+
+ADVANCED SETUP:
+  Run 'tnote setup --advanced' to configure the optional renderer and ls annotation."
     );
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CURRENT_TARGET_SENTINEL, glob_match, is_digits, is_tmux_window_id, normalize_bind_target, resolve_bind_target};
+    use super::{
+        glob_match, is_digits, is_tmux_window_id, normalize_bind_target, resolve_bind_target,
+        CURRENT_TARGET_SENTINEL,
+    };
     use crate::notes::Notes;
 
     #[test]
@@ -1060,8 +1309,14 @@ mod tests {
     fn bind_target_normalization_accepts_supported_forms() {
         assert_eq!(normalize_bind_target("4242").unwrap(), "shell-4242");
         assert_eq!(normalize_bind_target("shell-4242").unwrap(), "shell-4242");
-        assert_eq!(normalize_bind_target("$255+@278").unwrap(), "tmux-$255+@278");
-        assert_eq!(normalize_bind_target("tmux-$255+@278").unwrap(), "tmux-$255+@278");
+        assert_eq!(
+            normalize_bind_target("$255+@278").unwrap(),
+            "tmux-$255+@278"
+        );
+        assert_eq!(
+            normalize_bind_target("tmux-$255+@278").unwrap(),
+            "tmux-$255+@278"
+        );
     }
 
     #[test]
@@ -1076,6 +1331,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let notes = Notes::new(tmp.path().to_path_buf());
         let expected = super::current_note(&notes).0;
-        assert_eq!(resolve_bind_target(&notes, Some(CURRENT_TARGET_SENTINEL)).unwrap(), expected);
+        assert_eq!(
+            resolve_bind_target(&notes, Some(CURRENT_TARGET_SENTINEL)).unwrap(),
+            expected
+        );
     }
 }

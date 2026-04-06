@@ -59,6 +59,8 @@ tnote setup
 - **tmux bindings** (if tmux is available): `prefix+t` keybinding and `:tnote` command aliases
 - **shell keybinding**: `Ctrl+t` in your shell (zsh, bash, or fish), automatically disabled inside tmux to avoid conflicts
 
+Run `tnote setup --advanced` to also configure optional `tnote show` rendering and custom `tnote ls` annotations.
+
 ## Usage
 
 ```
@@ -70,7 +72,7 @@ tnote path                  Print the note file path
 tnote clean [--dryrun]      Remove orphaned notes and popup sessions
 tnote clean --named <name>  Remove a specific named note
 tnote clean --all <scope>   Remove notes by category: unprefixed, named, tmux, all
-tnote setup                 Configure and install keybindings
+tnote setup [--advanced]    Configure and install keybindings
 tnote uninstall             Remove tmux and shell keybindings
 tnote help                  Show help
 ```
@@ -105,7 +107,7 @@ tnote help                  Show help
   meta/
     tmux-$1+@3.link      contains "api-server" — links window to named note
     tmux.conf            tmux key binding (sourced by ~/.tmux.conf)
-    config               editor, key, width, height settings
+    config               editor, key, width, height, optional renderer settings
 ```
 
 Notes are plain markdown files. You can read, edit, grep, or back them up with any standard tool.
@@ -114,13 +116,15 @@ Notes are plain markdown files. You can read, edit, grep, or back them up with a
 
 Settings are read from `~/.tnote/meta/config` (written by `tnote setup`), with environment variables taking precedence.
 
-| Variable      | Default    | Description                                          |
-|---------------|------------|------------------------------------------------------|
-| `TNOTE_DIR`   | `~/.tnote` | Directory where notes are stored                     |
-| `EDITOR`      | `vim`      | Editor to open inside the popup                      |
-| `TNOTE_KEY`   | `t`        | Key binding (tmux: prefix+t, shell: Ctrl+t)          |
-| `TNOTE_WIDTH` | `62`       | Popup width in columns                               |
-| `TNOTE_HEIGHT`| `22`       | Popup height in lines                                |
+| Variable               | Default    | Description                                          |
+|------------------------|------------|------------------------------------------------------|
+| `TNOTE_DIR`            | `~/.tnote` | Directory where notes are stored                     |
+| `EDITOR`               | `vim`      | Editor to open inside the popup                      |
+| `TNOTE_KEY`            | `t`        | Key binding (tmux: prefix+t, shell: Ctrl+t)          |
+| `TNOTE_WIDTH`          | `100%`     | Popup width in columns or percent                    |
+| `TNOTE_HEIGHT`         | `50%`      | Popup height in lines or percent                     |
+| `TNOTE_RENDERER`       | empty      | Optional renderer for `tnote show` (`bat` currently) |
+| `TNOTE_LS_ANNOTATION`  | empty      | Optional shell command shown next to `tnote ls` rows |
 
 The config file can also be edited directly:
 
@@ -131,3 +135,13 @@ key=t
 width=80
 height=24
 ```
+
+Advanced config is optional. For example:
+
+```
+# ~/.tnote/meta/config
+renderer=bat
+ls_annotation=head -1 {}
+```
+
+If `renderer` is unset or empty, `tnote show` uses the built-in plain output.

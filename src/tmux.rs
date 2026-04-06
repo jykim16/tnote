@@ -33,7 +33,11 @@ pub fn window_key() -> Option<String> {
         .output()
         .ok()?;
     let key = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if key.is_empty() { None } else { Some(format!("tmux-{}", key)) }
+    if key.is_empty() {
+        None
+    } else {
+        Some(format!("tmux-{}", key))
+    }
 }
 
 /// Returns the set of all live tmux window keys (e.g. "tmux-$1+@3") across all sessions.
@@ -53,8 +57,12 @@ pub fn live_window_keys() -> std::collections::HashSet<String> {
 /// Returns a map of "tmux-$1+@3" → "session_name+window_index" for all live windows.
 pub fn window_label_map() -> HashMap<String, String> {
     let Ok(output) = Command::new("tmux")
-        .args(["list-windows", "-a", "-F",
-               "#{session_id} #{window_id} #{session_name}+#{window_index}"])
+        .args([
+            "list-windows",
+            "-a",
+            "-F",
+            "#{session_id} #{window_id} #{session_name}+#{window_index}",
+        ])
         .output()
     else {
         return HashMap::new();
@@ -63,8 +71,8 @@ pub fn window_label_map() -> HashMap<String, String> {
         .lines()
         .filter_map(|line| {
             let mut parts = line.splitn(3, ' ');
-            let s_id  = parts.next()?;
-            let w_id  = parts.next()?;
+            let s_id = parts.next()?;
+            let w_id = parts.next()?;
             let label = parts.next()?;
             Some((format!("tmux-{}+{}", s_id, w_id), label.trim().to_string()))
         })
@@ -75,7 +83,6 @@ pub fn window_label_map() -> HashMap<String, String> {
 pub fn window_display_label(key: &str) -> Option<String> {
     window_label_map().get(key).cloned()
 }
-
 
 /// Parse a tmux version string like "3.2a" or "2.9" into (major, minor).
 fn parse_version_str(s: &str) -> Option<(u32, u32)> {
@@ -102,7 +109,11 @@ fn tmux_server_version() -> Option<(u32, u32)> {
 }
 
 /// Open (or reattach to) a persistent popup session for the given note file.
-pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config) -> io::Result<()> {
+pub fn open_popup_session(
+    file: &Path,
+    key: &str,
+    config: &crate::config::Config,
+) -> io::Result<()> {
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("note");
     let stem_safe = stem.replace(['+', '/', '$', '@'], "_");
     let popup_session = format!("tnote-popup-{}", stem_safe);
@@ -128,20 +139,28 @@ pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config
     let attach_cmd = format!(
         "tmux attach-session -t {sess} 2>/dev/null || \
          tmux new-session -s {sess} -e TNOTE_WINDOW_KEY={key} -e EDITOR={editor} tnote popup",
-        sess   = shell_escape(&popup_session),
-        key    = shell_escape(key),
+        sess = shell_escape(&popup_session),
+        key = shell_escape(key),
         editor = shell_escape(&config.editor),
     );
 
     let output = Command::new("tmux")
         .args([
             "display-popup",
-            "-x", "R", "-y", "T",
-            "-w", &config.width,
-            "-h", &config.height,
-            "-b", "rounded",
-            "-T", &popup_title,
-            "-E", &attach_cmd,
+            "-x",
+            "R",
+            "-y",
+            "T",
+            "-w",
+            &config.width,
+            "-h",
+            &config.height,
+            "-b",
+            "rounded",
+            "-T",
+            &popup_title,
+            "-E",
+            &attach_cmd,
         ])
         .output()?;
 
@@ -174,18 +193,19 @@ pub fn open_popup_session(file: &Path, key: &str, config: &crate::config::Config
 /// Returns the list of session names that were removed.
 pub fn cleanup_popup_sessions(note_dir: &std::path::Path, dry_run: bool) -> Vec<String> {
     // Build the set of session names that have a matching note file.
-    let valid: std::collections::HashSet<String> =
-        std::fs::read_dir(note_dir)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| {
-                let path = e.path();
-                if path.extension()?.to_str()? != "md" { return None; }
-                let stem = path.file_stem()?.to_str()?;
-                Some(format!("tnote-popup-{}", stem.replace(['+', '/'], "_")))
-            })
-            .collect();
+    let valid: std::collections::HashSet<String> = std::fs::read_dir(note_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let path = e.path();
+            if path.extension()?.to_str()? != "md" {
+                return None;
+            }
+            let stem = path.file_stem()?.to_str()?;
+            Some(format!("tnote-popup-{}", stem.replace(['+', '/'], "_")))
+        })
+        .collect();
 
     let Ok(output) = Command::new("tmux")
         .args(["list-sessions", "-F", "#{session_name}:#{session_attached}"])
@@ -209,7 +229,9 @@ pub fn cleanup_popup_sessions(note_dir: &std::path::Path, dry_run: bool) -> Vec<
 
     if !dry_run {
         for session in &to_kill {
-            let _ = Command::new("tmux").args(["kill-session", "-t", session]).status();
+            let _ = Command::new("tmux")
+                .args(["kill-session", "-t", session])
+                .status();
         }
     }
 
@@ -218,16 +240,12 @@ pub fn cleanup_popup_sessions(note_dir: &std::path::Path, dry_run: bool) -> Vec<
 
 /// Rename the current tmux window.
 pub fn rename_window(name: &str) {
-    let _ = Command::new("tmux")
-        .args(["rename-window", name])
-        .output();
+    let _ = Command::new("tmux").args(["rename-window", name]).output();
 }
 
 /// Show a message in the tmux status bar.
 pub fn display_message(msg: &str) {
-    let _ = Command::new("tmux")
-        .args(["display-message", msg])
-        .status();
+    let _ = Command::new("tmux").args(["display-message", msg]).status();
 }
 
 fn executable_path() -> String {
@@ -283,12 +301,20 @@ pub fn prompt_name(config: &crate::config::Config, window_key: &str) {
     let _ = Command::new("tmux")
         .args([
             "display-popup",
-            "-x", "R", "-y", "T",
-            "-w", &config.width,
-            "-h", &config.height,
-            "-b", "rounded",
-            "-T", " tnote name ",
-            "-E", &attach_cmd,
+            "-x",
+            "R",
+            "-y",
+            "T",
+            "-w",
+            &config.width,
+            "-h",
+            &config.height,
+            "-b",
+            "rounded",
+            "-T",
+            " tnote name ",
+            "-E",
+            &attach_cmd,
         ])
         .status();
 }
@@ -296,7 +322,12 @@ pub fn prompt_name(config: &crate::config::Config, window_key: &str) {
 /// Show tmux's command prompt to enter a new note name for a specific window key.
 pub fn prompt_name_for_target(window_key: &str) {
     let _ = Command::new("tmux")
-        .args(["command-prompt", "-p", "Note name:", &name_prompt_command(window_key)])
+        .args([
+            "command-prompt",
+            "-p",
+            "Note name:",
+            &name_prompt_command(window_key),
+        ])
         .status();
 }
 

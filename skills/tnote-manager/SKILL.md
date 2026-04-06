@@ -106,11 +106,22 @@ When given a new task or priority:
 
 **CRITICAL: Do NOT use `tnote name` to create agent notes — it would change the manager's own pinned note.**
 
-Get the path and write the full note there (it's a new file):
+Derive the new agent-note path from the manager note you already claimed, then write the full note there (it's a new file):
 
+```bash
+NOTE_DIR=$(dirname "$NOTE_PATH")
+AGENT_NOTE="$NOTE_DIR/named-agent-<project>-<domain>-<task>.md"
 ```
-tnote path -n agent-<project>-<domain>-<task>
+
+If you do not already have `NOTE_PATH` in scope, recompute it from the manager note and then derive `AGENT_NOTE`:
+
+```bash
+NOTE_PATH=$(tnote path -n manager-<project>)
+NOTE_DIR=$(dirname "$NOTE_PATH")
+AGENT_NOTE="$NOTE_DIR/named-agent-<project>-<domain>-<task>.md"
 ```
+
+Do not call `tnote path -n agent-<project>-<domain>-<task>` for a brand new agent note. That command only works after the named note already exists.
 
 Use the note format from the `tnote-agent` skill. The note has four `---`-separated sections:
 
@@ -168,9 +179,18 @@ tnote name <agent-name> --bind "$WINDOW_KEY"
 
 # 5. Start the coding agent CLI session
 tmux send-keys -t <agent-name> '<agent-cli-command>' Enter
+
+# 6. Kick off the agent with its tnote as the starting context and tell it to begin work
+tmux send-keys -t <agent-name> 'Start a tnote agent with `tnote show -n <agent-name>`. Start the tasks in that note.'
+
+# 7. Submit the kickoff prompt as a separate Return keystroke
+tmux send-keys -t <agent-name> C-m
 ```
 
 Replace `<agent-cli-command>` with the actual command for the coding agent you are using in that tmux window.
+Replace `<agent-name>` in the kickoff message with the actual note name you just spawned.
+Use `tnote name <agent-name> --bind "$WINDOW_KEY"` here because it binds the exact detached tmux window you just created, without relying on that window to run a command before the agent CLI starts.
+Do not combine the kickoff text and submit key in the same `tmux send-keys` call. Send the text first, then send a separate `C-m` so Codex, Kiro, Claude, and similar TUIs treat it as submit rather than inserting a newline into the composer.
 
 After spawning, update the Agent Roster status and add a Log entry.
 

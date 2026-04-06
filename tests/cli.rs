@@ -19,7 +19,17 @@ fn tnote(dir: &Path) -> Command {
 
 /// Returns path to the tests/bin directory containing the fake tmux binary.
 fn fake_tmux_bin_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("bin")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("bin")
+}
+
+fn prepend_fake_bin(cmd: &mut Command) {
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    cmd.env(
+        "PATH",
+        format!("{}:{}", fake_tmux_bin_dir().display(), old_path),
+    );
 }
 
 /// Build a Command that simulates running inside tmux (fake tmux binary in PATH).
@@ -29,8 +39,7 @@ fn tnote_in_tmux(dir: &Path, home: &Path) -> Command {
     cmd.env("HOME", home);
     cmd.env("TMUX", "/tmp/fake-tmux,0,0"); // any non-empty value enables tmux mode
     cmd.env("EDITOR", "true");
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    cmd.env("PATH", format!("{}:{}", fake_tmux_bin_dir().display(), old_path));
+    prepend_fake_bin(&mut cmd);
     cmd
 }
 
@@ -87,6 +96,24 @@ fn show_displays_note_content() {
     let out = stdout(tnote(dir.path()).arg("show"));
     assert!(out.contains("hello"));
     assert!(out.contains("item one"));
+}
+
+#[test]
+fn show_can_render_with_bat_when_configured() {
+    let dir = TempDir::new().unwrap();
+    let path_out = stdout(tnote(dir.path()).arg("path"));
+    let note_path = Path::new(path_out.trim()).to_path_buf();
+    fs::create_dir_all(note_path.parent().unwrap()).unwrap();
+    fs::write(&note_path, "## hello\n- item one\n").unwrap();
+
+    let mut cmd = tnote(dir.path());
+    prepend_fake_bin(&mut cmd);
+    cmd.env("TNOTE_RENDERER", "bat").arg("show");
+    let out = stdout(&mut cmd);
+
+    assert!(out.contains("hello"));
+    assert!(out.contains("item one"));
+    assert!(out.contains("──"));
 }
 
 // ── tnote list ────────────────────────────────────────────────────────────────
@@ -165,7 +192,12 @@ fn name_output_says_named() {
 #[test]
 fn name_bind_accepts_tmux_window_key() {
     let dir = TempDir::new().unwrap();
-    assert!(exit_ok(tnote(dir.path()).args(["name", "boundproj", "--bind", "$9+@17"])));
+    assert!(exit_ok(tnote(dir.path()).args([
+        "name",
+        "boundproj",
+        "--bind",
+        "$9+@17"
+    ])));
     let named = dir.path().join("named-boundproj.md");
     assert!(named.exists());
     let link = dir.path().join("meta").join("tmux-$9+@17.link");
@@ -182,7 +214,11 @@ fn name_bind_boolean_uses_current_shell_key() {
         .to_string_lossy()
         .to_string();
 
-    assert!(exit_ok(tnote(dir.path()).args(["name", "boundproj", "--bind"])));
+    assert!(exit_ok(tnote(dir.path()).args([
+        "name",
+        "boundproj",
+        "--bind"
+    ])));
     let link = dir.path().join("meta").join(format!("{}.link", key));
     assert_eq!(fs::read_to_string(link).unwrap(), "boundproj");
 }
@@ -190,7 +226,12 @@ fn name_bind_boolean_uses_current_shell_key() {
 #[test]
 fn name_bind_accepts_prefixed_tmux_window_key() {
     let dir = TempDir::new().unwrap();
-    assert!(exit_ok(tnote(dir.path()).args(["name", "boundproj", "--bind", "tmux-$9+@17"])));
+    assert!(exit_ok(tnote(dir.path()).args([
+        "name",
+        "boundproj",
+        "--bind",
+        "tmux-$9+@17"
+    ])));
     let link = dir.path().join("meta").join("tmux-$9+@17.link");
     assert_eq!(fs::read_to_string(link).unwrap(), "boundproj");
 }
@@ -198,7 +239,12 @@ fn name_bind_accepts_prefixed_tmux_window_key() {
 #[test]
 fn name_bind_accepts_shell_pid() {
     let dir = TempDir::new().unwrap();
-    assert!(exit_ok(tnote(dir.path()).args(["name", "shellproj", "--bind", "4242"])));
+    assert!(exit_ok(tnote(dir.path()).args([
+        "name",
+        "shellproj",
+        "--bind",
+        "4242"
+    ])));
     let named = dir.path().join("named-shellproj.md");
     assert!(named.exists());
     let link = dir.path().join("meta").join("shell-4242.link");
@@ -208,7 +254,12 @@ fn name_bind_accepts_shell_pid() {
 #[test]
 fn name_bind_accepts_prefixed_shell_pid() {
     let dir = TempDir::new().unwrap();
-    assert!(exit_ok(tnote(dir.path()).args(["name", "shellproj", "--bind", "shell-4242"])));
+    assert!(exit_ok(tnote(dir.path()).args([
+        "name",
+        "shellproj",
+        "--bind",
+        "shell-4242"
+    ])));
     let link = dir.path().join("meta").join("shell-4242.link");
     assert_eq!(fs::read_to_string(link).unwrap(), "shellproj");
 }
@@ -247,10 +298,19 @@ fn name_unbind_removes_specific_tmux_binding() {
     let dir = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("meta")).unwrap();
     fs::write(dir.path().join("named-boundproj.md"), "data\n").unwrap();
-    fs::write(dir.path().join("meta").join("tmux-$9+@17.link"), "boundproj").unwrap();
+    fs::write(
+        dir.path().join("meta").join("tmux-$9+@17.link"),
+        "boundproj",
+    )
+    .unwrap();
     fs::write(dir.path().join("meta").join("shell-4242.link"), "boundproj").unwrap();
 
-    assert!(exit_ok(tnote(dir.path()).args(["name", "boundproj", "--unbind", "$9+@17"])));
+    assert!(exit_ok(tnote(dir.path()).args([
+        "name",
+        "boundproj",
+        "--unbind",
+        "$9+@17"
+    ])));
     assert!(!dir.path().join("meta").join("tmux-$9+@17.link").exists());
     assert!(dir.path().join("meta").join("shell-4242.link").exists());
 }
@@ -261,10 +321,18 @@ fn name_unbind_boolean_removes_all_bindings_for_note() {
     fs::create_dir_all(dir.path().join("meta")).unwrap();
     fs::write(dir.path().join("named-boundproj.md"), "data\n").unwrap();
     fs::write(dir.path().join("meta").join("shell-4242.link"), "boundproj").unwrap();
-    fs::write(dir.path().join("meta").join("tmux-$9+@17.link"), "boundproj").unwrap();
+    fs::write(
+        dir.path().join("meta").join("tmux-$9+@17.link"),
+        "boundproj",
+    )
+    .unwrap();
     fs::write(dir.path().join("meta").join("shell-9999.link"), "otherproj").unwrap();
 
-    assert!(exit_ok(tnote(dir.path()).args(["name", "boundproj", "--unbind"])));
+    assert!(exit_ok(tnote(dir.path()).args([
+        "name",
+        "boundproj",
+        "--unbind"
+    ])));
     assert!(!dir.path().join("meta").join("shell-4242.link").exists());
     assert!(!dir.path().join("meta").join("tmux-$9+@17.link").exists());
     assert!(dir.path().join("meta").join("shell-9999.link").exists());
@@ -275,7 +343,11 @@ fn name_unbind_rejects_key_bound_to_other_note() {
     let dir = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("meta")).unwrap();
     fs::write(dir.path().join("named-boundproj.md"), "data\n").unwrap();
-    fs::write(dir.path().join("meta").join("tmux-$9+@17.link"), "otherproj").unwrap();
+    fs::write(
+        dir.path().join("meta").join("tmux-$9+@17.link"),
+        "otherproj",
+    )
+    .unwrap();
 
     let output = tnote(dir.path())
         .args(["name", "boundproj", "--unbind", "$9+@17"])
@@ -342,7 +414,9 @@ fn clean_named_removes_named_note() {
     let dir = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("meta")).unwrap();
     fs::write(dir.path().join("named-deleteme.md"), "bye\n").unwrap();
-    assert!(exit_ok(tnote(dir.path()).args(["clean", "--name", "deleteme"])));
+    assert!(exit_ok(
+        tnote(dir.path()).args(["clean", "--name", "deleteme"])
+    ));
     assert!(!dir.path().join("named-deleteme.md").exists());
 }
 
@@ -350,7 +424,11 @@ fn clean_named_removes_named_note() {
 fn clean_named_not_found_exits_nonzero() {
     let dir = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("meta")).unwrap();
-    let status = tnote(dir.path()).args(["clean", "--name", "ghost"]).output().unwrap().status;
+    let status = tnote(dir.path())
+        .args(["clean", "--name", "ghost"])
+        .output()
+        .unwrap()
+        .status;
     assert!(!status.success());
     let err = stderr(tnote(dir.path()).args(["clean", "--name", "ghost"]));
     assert!(err.contains("not found"));
@@ -395,7 +473,7 @@ fn popup_runs_editor_on_note_file() {
 
 #[test]
 fn open_in_tmux_uses_popup_session() {
-    let dir  = TempDir::new().unwrap();
+    let dir = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("meta")).unwrap();
     // tnote with no args + TMUX set → calls open_popup_session → fake tmux exits 0
@@ -408,7 +486,7 @@ fn open_in_tmux_uses_popup_session() {
 
 #[test]
 fn show_in_tmux_falls_back_to_shell_note() {
-    let dir  = TempDir::new().unwrap();
+    let dir = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     // Create a shell note; tmux note doesn't exist (fake tmux returns empty IDs)
     let path_out = stdout(tnote(dir.path()).arg("path"));
@@ -422,7 +500,7 @@ fn show_in_tmux_falls_back_to_shell_note() {
 
 #[test]
 fn list_in_tmux_shows_notes() {
-    let dir  = TempDir::new().unwrap();
+    let dir = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("meta")).unwrap();
     fs::write(dir.path().join("named-proj.md"), "content\n").unwrap();
@@ -432,7 +510,7 @@ fn list_in_tmux_shows_notes() {
 
 #[test]
 fn clean_in_tmux_kills_orphaned_popup_session() {
-    let dir  = TempDir::new().unwrap();
+    let dir = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("meta")).unwrap();
     // Fake tmux returns "tnote-popup-orphan:0" from list-sessions;
@@ -443,7 +521,7 @@ fn clean_in_tmux_kills_orphaned_popup_session() {
 
 #[test]
 fn name_in_tmux_renames_window() {
-    let dir  = TempDir::new().unwrap();
+    let dir = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     // rename-window is called → fake tmux exits 0
     let status = tnote_in_tmux(dir.path(), home.path())
@@ -461,7 +539,11 @@ fn name_without_argument_in_tmux_opens_name_picker_popup_with_config_dimensions(
     let log = dir.path().join("fake-tmux.log");
 
     fs::create_dir_all(dir.path().join("meta")).unwrap();
-    fs::write(dir.path().join("meta").join("config"), "width=73\nheight=19\n").unwrap();
+    fs::write(
+        dir.path().join("meta").join("config"),
+        "width=73\nheight=19\n",
+    )
+    .unwrap();
     fs::write(dir.path().join("named-alpha.md"), "").unwrap();
     fs::write(dir.path().join("named-beta project.md"), "").unwrap();
 
@@ -471,8 +553,14 @@ fn name_without_argument_in_tmux_opens_name_picker_popup_with_config_dimensions(
         .env("TMUX", "/tmp/fake-tmux,0,0")
         .env("EDITOR", "true")
         .env("FAKE_TMUX_LOG", &log)
-        .env("PATH", format!("{}:{}", fake_tmux_bin_dir().display(),
-                             std::env::var("PATH").unwrap_or_default()))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                fake_tmux_bin_dir().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
         .arg("name")
         .output()
         .unwrap()
@@ -490,7 +578,7 @@ fn name_without_argument_in_tmux_opens_name_picker_popup_with_config_dimensions(
 
 #[test]
 fn setup_writes_tmux_conf_and_updates_tmux_conf_file() {
-    let dir  = TempDir::new().unwrap();
+    let dir = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     // Pipe newlines to accept all defaults in the interactive prompts
     let mut child = Command::new(binary())
@@ -498,8 +586,14 @@ fn setup_writes_tmux_conf_and_updates_tmux_conf_file() {
         .env("HOME", home.path())
         .env("TMUX", "/tmp/fake-tmux,0,0")
         .env("EDITOR", "true")
-        .env("PATH", format!("{}:{}", fake_tmux_bin_dir().display(),
-                             std::env::var("PATH").unwrap_or_default()))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                fake_tmux_bin_dir().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
         .arg("setup")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -523,8 +617,90 @@ fn setup_writes_tmux_conf_and_updates_tmux_conf_file() {
 }
 
 #[test]
+fn setup_advanced_writes_renderer_and_ls_annotation() {
+    let dir = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let mut child = Command::new(binary())
+        .env("TNOTE_DIR", dir.path())
+        .env("HOME", home.path())
+        .env("TMUX", "/tmp/fake-tmux,0,0")
+        .env("EDITOR", "true")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                fake_tmux_bin_dir().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .args(["setup", "--advanced"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"\n\n\n\nbat\nhead -1 {}\n")
+        .unwrap();
+    let status = child.wait().unwrap();
+    assert!(status.success());
+
+    let content = fs::read_to_string(dir.path().join("meta").join("config")).unwrap();
+    assert!(content.contains("renderer=bat"));
+    assert!(content.contains("ls_annotation=head -1 {}"));
+}
+
+#[test]
+fn setup_advanced_blank_renderer_clears_to_plain_output() {
+    let dir = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("meta")).unwrap();
+    fs::write(
+        dir.path().join("meta").join("config"),
+        "editor=true\nkey=t\nwidth=100%\nheight=50%\nrenderer=bat\n",
+    )
+    .unwrap();
+
+    let mut child = Command::new(binary())
+        .env("TNOTE_DIR", dir.path())
+        .env("HOME", home.path())
+        .env("TMUX", "/tmp/fake-tmux,0,0")
+        .env("EDITOR", "true")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                fake_tmux_bin_dir().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .args(["setup", "--advanced"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"\n\n\n\n\n\n")
+        .unwrap();
+    let status = child.wait().unwrap();
+    assert!(status.success());
+
+    let content = fs::read_to_string(dir.path().join("meta").join("config")).unwrap();
+    assert!(!content.contains("renderer="));
+}
+
+#[test]
 fn uninstall_removes_source_line_from_tmux_conf() {
-    let dir  = TempDir::new().unwrap();
+    let dir = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     // Pre-create the tmux.conf with a binding and a ~/.tmux.conf with source line
     let meta = dir.path().join("meta");
@@ -532,14 +708,24 @@ fn uninstall_removes_source_line_from_tmux_conf() {
     let tnote_conf = meta.join("tmux.conf");
     fs::write(&tnote_conf, "bind-key t run-shell 'tnote'\n").unwrap();
     let user_conf = home.path().join(".tmux.conf");
-    fs::write(&user_conf, format!("source-file {}\n", tnote_conf.display())).unwrap();
+    fs::write(
+        &user_conf,
+        format!("source-file {}\n", tnote_conf.display()),
+    )
+    .unwrap();
 
     let status = Command::new(binary())
         .env("TNOTE_DIR", dir.path())
         .env("HOME", home.path())
         .env("TMUX", "/tmp/fake-tmux,0,0")
-        .env("PATH", format!("{}:{}", fake_tmux_bin_dir().display(),
-                             std::env::var("PATH").unwrap_or_default()))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                fake_tmux_bin_dir().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
         .arg("uninstall")
         .output()
         .unwrap()
@@ -589,7 +775,11 @@ fn completions_fish_include_dynamic_named_note_helper() {
 #[test]
 fn show_name_not_found_exits_nonzero() {
     let dir = TempDir::new().unwrap();
-    let status = tnote(dir.path()).args(["show", "--name", "ghost"]).output().unwrap().status;
+    let status = tnote(dir.path())
+        .args(["show", "--name", "ghost"])
+        .output()
+        .unwrap()
+        .status;
     assert!(!status.success());
     let err = stderr(&mut tnote(dir.path()).args(["show", "--name", "ghost"]));
     assert!(err.contains("named note 'ghost' not found"));
@@ -598,7 +788,11 @@ fn show_name_not_found_exits_nonzero() {
 #[test]
 fn path_name_not_found_exits_nonzero() {
     let dir = TempDir::new().unwrap();
-    let status = tnote(dir.path()).args(["path", "--name", "ghost"]).output().unwrap().status;
+    let status = tnote(dir.path())
+        .args(["path", "--name", "ghost"])
+        .output()
+        .unwrap()
+        .status;
     assert!(!status.success());
     let err = stderr(&mut tnote(dir.path()).args(["path", "--name", "ghost"]));
     assert!(err.contains("named note 'ghost' not found"));
@@ -608,7 +802,10 @@ fn path_name_not_found_exits_nonzero() {
 fn show_name_prints_named_note() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("named-todo.md"), "buy milk\n").unwrap();
-    let output = tnote(dir.path()).args(["show", "--name", "todo"]).output().unwrap();
+    let output = tnote(dir.path())
+        .args(["show", "--name", "todo"])
+        .output()
+        .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("buy milk"));
@@ -618,7 +815,10 @@ fn show_name_prints_named_note() {
 fn path_name_prints_named_path() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("named-todo.md"), "").unwrap();
-    let output = tnote(dir.path()).args(["path", "--name", "todo"]).output().unwrap();
+    let output = tnote(dir.path())
+        .args(["path", "--name", "todo"])
+        .output()
+        .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("named-todo.md"));
@@ -629,14 +829,20 @@ fn clean_name_removes_named_note() {
     let dir = TempDir::new().unwrap();
     let note = dir.path().join("named-temp.md");
     fs::write(&note, "data").unwrap();
-    assert!(exit_ok(&mut tnote(dir.path()).args(["clean", "--name", "temp"])));
+    assert!(exit_ok(
+        &mut tnote(dir.path()).args(["clean", "--name", "temp"])
+    ));
     assert!(!note.exists());
 }
 
 #[test]
 fn clean_name_not_found_exits_nonzero() {
     let dir = TempDir::new().unwrap();
-    let status = tnote(dir.path()).args(["clean", "--name", "ghost"]).output().unwrap().status;
+    let status = tnote(dir.path())
+        .args(["clean", "--name", "ghost"])
+        .output()
+        .unwrap()
+        .status;
     assert!(!status.success());
 }
 
@@ -644,7 +850,10 @@ fn clean_name_not_found_exits_nonzero() {
 fn show_name_shorthand_works() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("named-x.md"), "hello\n").unwrap();
-    let output = tnote(dir.path()).args(["show", "-n", "x"]).output().unwrap();
+    let output = tnote(dir.path())
+        .args(["show", "-n", "x"])
+        .output()
+        .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("hello"));
@@ -653,10 +862,25 @@ fn show_name_shorthand_works() {
 #[test]
 fn show_name_glob_matches_multiple_notes() {
     let dir = TempDir::new().unwrap();
-    fs::write(dir.path().join("named-proj-auth-login.md"),   "login content\n").unwrap();
-    fs::write(dir.path().join("named-proj-auth-session.md"), "session content\n").unwrap();
-    fs::write(dir.path().join("named-other-api-search.md"),  "search content\n").unwrap();
-    let output = tnote(dir.path()).args(["show", "--name", "proj-*"]).output().unwrap();
+    fs::write(
+        dir.path().join("named-proj-auth-login.md"),
+        "login content\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("named-proj-auth-session.md"),
+        "session content\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("named-other-api-search.md"),
+        "search content\n",
+    )
+    .unwrap();
+    let output = tnote(dir.path())
+        .args(["show", "--name", "proj-*"])
+        .output()
+        .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("login content"));
@@ -667,17 +891,28 @@ fn show_name_glob_matches_multiple_notes() {
 #[test]
 fn show_name_glob_no_matches_exits_nonzero() {
     let dir = TempDir::new().unwrap();
-    let status = tnote(dir.path()).args(["show", "--name", "ghost-*"]).output().unwrap().status;
+    let status = tnote(dir.path())
+        .args(["show", "--name", "ghost-*"])
+        .output()
+        .unwrap()
+        .status;
     assert!(!status.success());
 }
 
 #[test]
 fn show_name_glob_mid_pattern() {
     let dir = TempDir::new().unwrap();
-    fs::write(dir.path().join("named-proj-auth-login.md"),  "auth login\n").unwrap();
-    fs::write(dir.path().join("named-proj-api-login.md"),   "api login\n").unwrap();
-    fs::write(dir.path().join("named-proj-auth-logout.md"), "auth logout\n").unwrap();
-    let output = tnote(dir.path()).args(["show", "--name", "proj-*-login"]).output().unwrap();
+    fs::write(dir.path().join("named-proj-auth-login.md"), "auth login\n").unwrap();
+    fs::write(dir.path().join("named-proj-api-login.md"), "api login\n").unwrap();
+    fs::write(
+        dir.path().join("named-proj-auth-logout.md"),
+        "auth logout\n",
+    )
+    .unwrap();
+    let output = tnote(dir.path())
+        .args(["show", "--name", "proj-*-login"])
+        .output()
+        .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("auth login"));
@@ -690,7 +925,7 @@ fn ls_is_alias_for_list() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("named-foo.md"), "content\n").unwrap();
     let out_list = tnote(dir.path()).args(["list"]).output().unwrap();
-    let out_ls   = tnote(dir.path()).args(["ls"]).output().unwrap();
+    let out_ls = tnote(dir.path()).args(["ls"]).output().unwrap();
     assert!(out_ls.status.success());
     assert_eq!(out_list.stdout, out_ls.stdout);
 }
@@ -702,7 +937,9 @@ fn name_unbind_boolean_removes_named_note_link_files() {
     fs::write(dir.path().join("named-myproj.md"), "data\n").unwrap();
     fs::write(dir.path().join("meta").join("tmux-work+0.link"), "myproj").unwrap();
     fs::write(dir.path().join("meta").join("tmux-work+1.link"), "myproj").unwrap();
-    assert!(exit_ok(&mut tnote(dir.path()).args(["name", "myproj", "--unbind"])));
+    assert!(exit_ok(
+        &mut tnote(dir.path()).args(["name", "myproj", "--unbind"])
+    ));
     assert!(!dir.path().join("meta").join("tmux-work+0.link").exists());
     assert!(!dir.path().join("meta").join("tmux-work+1.link").exists());
     assert!(dir.path().join("named-myproj.md").exists());
@@ -712,6 +949,10 @@ fn name_unbind_boolean_removes_named_note_link_files() {
 fn name_unbind_boolean_not_bound_exits_nonzero() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("named-myproj.md"), "data\n").unwrap();
-    let status = tnote(dir.path()).args(["name", "myproj", "--unbind"]).output().unwrap().status;
+    let status = tnote(dir.path())
+        .args(["name", "myproj", "--unbind"])
+        .output()
+        .unwrap()
+        .status;
     assert!(!status.success());
 }

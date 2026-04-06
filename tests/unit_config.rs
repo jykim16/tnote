@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 use tempfile::TempDir;
-use tnote::config::{read_config_file, parse_str, Config};
+use tnote::config::{parse_str, read_config_file, Config};
 
 // Serialize tests that mutate env vars.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -77,11 +77,12 @@ fn test_parse_str_default() {
 fn test_save_writes_correct_format() {
     let dir = TempDir::new().unwrap();
     let cfg = Config {
-        dir:    dir.path().to_path_buf(),
+        dir: dir.path().to_path_buf(),
         editor: "nvim".into(),
-        key:    "n".into(),
-        width:  "100".into(),
+        key: "n".into(),
+        width: "100".into(),
         height: "30".into(),
+        renderer: None,
         ls_annotation: None,
     };
     cfg.save().unwrap();
@@ -97,11 +98,12 @@ fn test_save_round_trip() {
     let _lock = ENV_LOCK.lock().unwrap();
     let dir = TempDir::new().unwrap();
     let cfg = Config {
-        dir:    dir.path().to_path_buf(),
+        dir: dir.path().to_path_buf(),
         editor: "nano".into(),
-        key:    "u".into(),
-        width:  "50".into(),
+        key: "u".into(),
+        width: "50".into(),
         height: "15".into(),
+        renderer: Some("bat".into()),
         ls_annotation: None,
     };
     cfg.save().unwrap();
@@ -115,9 +117,10 @@ fn test_save_round_trip() {
     std::env::remove_var("TNOTE_DIR");
 
     assert_eq!(loaded.editor, "nano");
-    assert_eq!(loaded.key,    "u");
-    assert_eq!(loaded.width,  "50");
+    assert_eq!(loaded.key, "u");
+    assert_eq!(loaded.width, "50");
     assert_eq!(loaded.height, "15");
+    assert_eq!(loaded.renderer.as_deref(), Some("bat"));
 }
 
 #[test]
@@ -129,11 +132,14 @@ fn test_from_env_defaults_when_no_config_file() {
     std::env::remove_var("TNOTE_HEIGHT");
     std::env::remove_var("TNOTE_KEY");
     std::env::remove_var("EDITOR");
+    std::env::remove_var("TNOTE_RENDERER");
+    std::env::remove_var("TNOTE_SHOW_RENDERER");
     let cfg = Config::from_env();
     std::env::remove_var("TNOTE_DIR");
-    assert_eq!(cfg.width,  "100%");
+    assert_eq!(cfg.width, "100%");
     assert_eq!(cfg.height, "50%");
-    assert_eq!(cfg.key,    "t");
+    assert_eq!(cfg.key, "t");
+    assert_eq!(cfg.renderer, None);
 }
 
 #[test]
@@ -174,7 +180,7 @@ fn test_from_env_migration_termnotes_to_tnote() {
 fn test_from_env_no_migration_when_tnote_exists() {
     let _lock = ENV_LOCK.lock().unwrap();
     let home = TempDir::new().unwrap();
-    let tnote_dir  = home.path().join(".tnote");
+    let tnote_dir = home.path().join(".tnote");
     let tnotes_dir = home.path().join(".tnotes");
     std::fs::create_dir_all(&tnote_dir).unwrap();
     std::fs::create_dir_all(&tnotes_dir).unwrap();

@@ -1,5 +1,5 @@
 use tempfile::TempDir;
-use tnote::notes::{Notes, ClearScope, get_shell_pid, shell_session_key};
+use tnote::notes::{get_shell_pid, shell_session_key, ClearScope, Notes};
 
 fn setup() -> (Notes, TempDir) {
     let dir = TempDir::new().unwrap();
@@ -51,7 +51,7 @@ fn test_ensure_dir_creates_dirs() {
 fn test_migrate_to_meta_moves_link_and_pid_files() {
     let (notes, _dir) = setup();
     std::fs::write(notes.dir.join("tmux-$1+@3.link"), "project").unwrap();
-    std::fs::write(notes.dir.join("tmux-$1+@3.pid"),  "12345").unwrap();
+    std::fs::write(notes.dir.join("tmux-$1+@3.pid"), "12345").unwrap();
     notes.ensure_dir().unwrap();
     assert!(notes.meta_dir().join("tmux-$1+@3.link").exists());
     assert!(notes.meta_dir().join("tmux-$1+@3.pid").exists());
@@ -213,7 +213,9 @@ fn test_cleanup_keeps_named_note_by_default() {
 fn test_cleanup_scope_named_removes_named() {
     let (notes, _dir) = setup();
     write_note(&notes, "named-docs", "content");
-    let removed = notes.cleanup_orphaned(Some(&ClearScope::Named), false).unwrap();
+    let removed = notes
+        .cleanup_orphaned(Some(&ClearScope::Named), false)
+        .unwrap();
     assert!(removed.contains(&"named-docs".to_string()));
 }
 
@@ -224,7 +226,9 @@ fn test_cleanup_scope_all_removes_everything() {
     write_note(&notes, &format!("shell-{}", pid), "s");
     write_note(&notes, "tmux-$1+@3", "t");
     write_note(&notes, "named-docs", "n");
-    let removed = notes.cleanup_orphaned(Some(&ClearScope::All), false).unwrap();
+    let removed = notes
+        .cleanup_orphaned(Some(&ClearScope::All), false)
+        .unwrap();
     assert!(removed.contains(&format!("shell-{}", pid)));
     assert!(removed.contains(&"tmux-$1+@3".to_string()));
     assert!(removed.contains(&"named-docs".to_string()));
@@ -234,7 +238,9 @@ fn test_cleanup_scope_all_removes_everything() {
 fn test_cleanup_scope_tmux_forces_tmux_removal() {
     let (notes, _dir) = setup();
     write_note(&notes, "tmux-$1+@3", "t");
-    let removed = notes.cleanup_orphaned(Some(&ClearScope::Tmux), false).unwrap();
+    let removed = notes
+        .cleanup_orphaned(Some(&ClearScope::Tmux), false)
+        .unwrap();
     assert!(removed.contains(&"tmux-$1+@3".to_string()));
 }
 
@@ -242,7 +248,9 @@ fn test_cleanup_scope_tmux_forces_tmux_removal() {
 fn test_cleanup_scope_unprefixed() {
     let (notes, _dir) = setup();
     write_note(&notes, "weird-file", "content");
-    let removed = notes.cleanup_orphaned(Some(&ClearScope::Unprefixed), false).unwrap();
+    let removed = notes
+        .cleanup_orphaned(Some(&ClearScope::Unprefixed), false)
+        .unwrap();
     assert!(removed.contains(&"weird-file".to_string()));
 }
 

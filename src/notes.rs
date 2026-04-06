@@ -19,7 +19,11 @@ pub enum ClearScope {
 pub fn get_shell_pid() -> Option<u32> {
     // /proc/self/stat is not available on macOS, so we use getppid() via libc.
     let ppid = unsafe { libc::getppid() };
-    if ppid > 0 { Some(ppid as u32) } else { None }
+    if ppid > 0 {
+        Some(ppid as u32)
+    } else {
+        None
+    }
 }
 
 /// Returns a stable key for the current shell session using the parent process PID.
@@ -103,13 +107,13 @@ impl Notes {
         let old_file = self.dir.join(format!("{}.md", key));
         let new_file = self.dir.join(format!("named-{}.md", name));
 
-        let migrated =
-            if old_file.exists() && old_file.metadata()?.len() > 0 && !new_file.exists() {
-                fs::rename(&old_file, &new_file)?;
-                true
-            } else {
-                false
-            };
+        let migrated = if old_file.exists() && old_file.metadata()?.len() > 0 && !new_file.exists()
+        {
+            fs::rename(&old_file, &new_file)?;
+            true
+        } else {
+            false
+        };
 
         // Ensure the named note file exists so it appears in `tnote list`.
         if !new_file.exists() {
@@ -127,7 +131,11 @@ impl Notes {
     ///   `tmux-*.*`        — tmux window key; checked against live tmux windows.
     ///   `named-<name>.*`  — Never removed unless scope is Named or All.
     ///   unprefixed        — Never removed unless scope is Unprefixed or All.
-    pub fn cleanup_orphaned(&self, scope: Option<&ClearScope>, dry_run: bool) -> std::io::Result<Vec<String>> {
+    pub fn cleanup_orphaned(
+        &self,
+        scope: Option<&ClearScope>,
+        dry_run: bool,
+    ) -> std::io::Result<Vec<String>> {
         let meta = self.meta_dir();
 
         let include_named = matches!(scope, Some(ClearScope::Named) | Some(ClearScope::All));
@@ -138,9 +146,13 @@ impl Notes {
             for entry in fs::read_dir(dir)? {
                 let name = entry?.file_name();
                 let name = name.to_string_lossy();
-                let stem = if let Some(s) = name.strip_suffix(".md")   { s }
-                      else if let Some(s) = name.strip_suffix(".link") { s }
-                      else { continue };
+                let stem = if let Some(s) = name.strip_suffix(".md") {
+                    s
+                } else if let Some(s) = name.strip_suffix(".link") {
+                    s
+                } else {
+                    continue;
+                };
                 if !stem.starts_with("named-") || include_named {
                     stems.insert(stem.to_string());
                 }
@@ -176,7 +188,7 @@ impl Notes {
                         && live_windows.contains(&stem);
                     if !superseded_only {
                         let _ = fs::remove_file(meta.join(format!("{}.link", &stem)));
-                        let _ = fs::remove_file(meta.join(format!("{}.pid",  &stem)));
+                        let _ = fs::remove_file(meta.join(format!("{}.pid", &stem)));
                     }
                 }
                 removed.push(stem);
@@ -265,7 +277,10 @@ impl Notes {
         if !link.exists() {
             return Ok(None);
         }
-        let name = fs::read_to_string(&link).unwrap_or_default().trim().to_string();
+        let name = fs::read_to_string(&link)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         fs::remove_file(&link)?;
         Ok(Some(name))
     }
@@ -297,8 +312,12 @@ impl Notes {
                 if entry.path().extension().and_then(|s| s.to_str()) == Some("link") {
                     if let Ok(target) = fs::read_to_string(entry.path()) {
                         if target.trim() == name {
-                            let key = entry.file_name().to_string_lossy()
-                                .strip_suffix(".link").unwrap_or("").to_string();
+                            let key = entry
+                                .file_name()
+                                .to_string_lossy()
+                                .strip_suffix(".link")
+                                .unwrap_or("")
+                                .to_string();
                             let _ = fs::remove_file(entry.path());
                             unbound.push(key);
                         }
@@ -335,8 +354,10 @@ impl Notes {
     /// Category is one of: "tmux", "named", "shell", "other".
     /// Sources is non-empty only for named notes — the keys that link to this note.
     #[allow(clippy::type_complexity)]
-    pub fn list_notes(&self) -> std::io::Result<Vec<(String, String, Vec<String>, usize, PathBuf)>> {
-        let sources   = self.link_sources();
+    pub fn list_notes(
+        &self,
+    ) -> std::io::Result<Vec<(String, String, Vec<String>, usize, PathBuf)>> {
+        let sources = self.link_sources();
         let label_map = crate::tmux::window_label_map();
         let mut notes = Vec::new();
 
@@ -355,7 +376,8 @@ impl Notes {
                 .to_string();
 
             let (category, display) = if stem.starts_with("tmux-") {
-                let label = label_map.get(stem.as_str())
+                let label = label_map
+                    .get(stem.as_str())
                     .cloned()
                     .unwrap_or_else(|| stem.strip_prefix("tmux-").unwrap_or(&stem).to_string());
                 ("tmux".to_string(), label)
@@ -395,14 +417,16 @@ impl Notes {
         names.sort();
         Ok(names)
     }
-
 }
 
 pub fn is_pid_alive(pid: u32) -> bool {
     // kill(pid, 0) checks process existence without sending a signal.
     // Returns 0 if process exists. On error, ESRCH means not found;
     // EPERM means it exists but we lack permission — still alive.
-    unsafe { libc::kill(pid as i32, 0) == 0 || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH) }
+    unsafe {
+        libc::kill(pid as i32, 0) == 0
+            || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    }
 }
 
 #[cfg(test)]
@@ -669,7 +693,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let notes = setup(&tmp);
         fs::write(tmp.path().join("named-work.md"), "content").unwrap();
-        let removed = notes.cleanup_orphaned(Some(&ClearScope::Named), false).unwrap();
+        let removed = notes
+            .cleanup_orphaned(Some(&ClearScope::Named), false)
+            .unwrap();
         assert!(removed.contains(&"named-work".to_string()));
         assert!(!tmp.path().join("named-work.md").exists());
     }
@@ -706,7 +732,9 @@ mod tests {
         fs::write(tmp.path().join("named-work.md"), "x").unwrap();
         fs::write(tmp.path().join("tmux-$1+@1.md"), "y").unwrap();
         fs::write(tmp.path().join("custom.md"), "z").unwrap();
-        let removed = notes.cleanup_orphaned(Some(&ClearScope::All), false).unwrap();
+        let removed = notes
+            .cleanup_orphaned(Some(&ClearScope::All), false)
+            .unwrap();
         assert!(removed.contains(&"named-work".to_string()));
         assert!(removed.contains(&"tmux-$1+@1".to_string()));
         assert!(removed.contains(&"custom".to_string()));
@@ -739,7 +767,10 @@ mod tests {
         assert!(cats.contains(&"shell"));
         assert!(cats.contains(&"other"));
 
-        let work = list.iter().find(|(c, d, _, _, _)| c == "named" && d == "work").unwrap();
+        let work = list
+            .iter()
+            .find(|(c, d, _, _, _)| c == "named" && d == "work")
+            .unwrap();
         assert_eq!(work.3, 2); // line count
 
         let shell = list.iter().find(|(c, _, _, _, _)| c == "shell").unwrap();
@@ -763,7 +794,10 @@ mod tests {
         fs::write(tmp.path().join("named-work.md"), "content").unwrap();
         fs::write(notes.meta_dir().join("tmux-$1+@3.link"), "work").unwrap();
         let list = notes.list_notes().unwrap();
-        let work = list.iter().find(|(c, d, _, _, _)| c == "named" && d == "work").unwrap();
+        let work = list
+            .iter()
+            .find(|(c, d, _, _, _)| c == "named" && d == "work")
+            .unwrap();
         assert_eq!(work.2, vec!["tmux-$1+@3"]);
     }
 }

@@ -27,6 +27,7 @@ Look for a note whose name matches the current project-domain. If one exists and
 When resuming an existing note, reconcile it before starting fresh work:
 - Move stale or completed items out of `In Progress`
 - Add the current task to `In Progress` or `Queue`
+- Before you start a task, make sure it already appears under `In Progress`
 - Refresh `Context > Background` if the scope or constraints changed
 
 Only proceed to create a new note if no relevant existing note is found.
@@ -112,6 +113,7 @@ After writing the note, briefly tell the user the plan (tasks in order) before s
 Update your note as work progresses - not just at the end.
 
 **Task transitions:**
+- **Before starting any work**: add it to `In Progress` if it is not already listed there
 - **Starting a subtask**: move it from Queue -> In Progress
 - **Finishing a subtask**: move it to Done, add a log entry
 - **Blocked**: move the subtask to Blocked, set `Status: blocked`

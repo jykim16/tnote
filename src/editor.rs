@@ -30,7 +30,7 @@ fn resolve_dim(s: &str, total: u16) -> u16 {
 
 fn make_rect(width: &str, height: &str) -> io::Result<(Rect, u16, u16)> {
     let (term_w, term_h) = terminal::size()?;
-    let popup_w = resolve_dim(width,  term_w);
+    let popup_w = resolve_dim(width, term_w);
     let popup_h = resolve_dim(height, term_h);
     let rect = Rect::new(term_w.saturating_sub(popup_w), 0, popup_w, popup_h);
     let inner_w = popup_w.saturating_sub(2);
@@ -48,21 +48,29 @@ pub fn run(file: &Path, label: &str, width: &str, height: &str) -> io::Result<()
 
     let pty_system = portable_pty::native_pty_system();
     let pair = pty_system
-        .openpty(PtySize { rows: init_ih, cols: init_iw, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize {
+            rows: init_ih,
+            cols: init_iw,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .map_err(|e| io::Error::other(e.to_string()))?;
 
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
     let mut cmd = CommandBuilder::new(&editor);
     cmd.arg(file);
-    let mut child = pair.slave
+    let mut child = pair
+        .slave
         .spawn_command(cmd)
         .map_err(|e| io::Error::other(e.to_string()))?;
     drop(pair.slave);
 
-    let mut pty_writer = pair.master
+    let mut pty_writer = pair
+        .master
         .take_writer()
         .map_err(|e| io::Error::other(e.to_string()))?;
-    let mut pty_reader = pair.master
+    let mut pty_reader = pair
+        .master
         .try_clone_reader()
         .map_err(|e| io::Error::other(e.to_string()))?;
 
@@ -115,7 +123,9 @@ pub fn run(file: &Path, label: &str, width: &str, height: &str) -> io::Result<()
 
     let mut terminal = Terminal::with_options(
         CrosstermBackend::new(io::stdout()),
-        TerminalOptions { viewport: Viewport::Fixed(rect) },
+        TerminalOptions {
+            viewport: Viewport::Fixed(rect),
+        },
     )?;
 
     // ── Event loop ─────────────────────────────────────────────────────────────
@@ -146,12 +156,7 @@ pub fn run(file: &Path, label: &str, width: &str, height: &str) -> io::Result<()
                         if let Some(cell) = screen.cell(row, col) {
                             let s = cell.contents();
                             let s = if s.is_empty() { " ".to_string() } else { s };
-                            buf.set_string(
-                                rect.x + 1 + col,
-                                rect.y + 1 + row,
-                                s,
-                                cell_style(cell),
-                            );
+                            buf.set_string(rect.x + 1 + col, rect.y + 1 + row, s, cell_style(cell));
                         }
                     }
                 }
@@ -161,10 +166,7 @@ pub fn run(file: &Path, label: &str, width: &str, height: &str) -> io::Result<()
             if !screen.hide_cursor() {
                 let (cur_row, cur_col) = screen.cursor_position();
                 if cur_row < inner_h && cur_col < inner_w {
-                    frame.set_cursor_position((
-                        rect.x + 1 + cur_col,
-                        rect.y + 1 + cur_row,
-                    ));
+                    frame.set_cursor_position((rect.x + 1 + cur_col, rect.y + 1 + cur_row));
                 }
             }
         })?;
@@ -205,17 +207,25 @@ fn cell_style(cell: &vt100::Cell) -> Style {
     let fg = vt100_color(cell.fgcolor());
     let bg = vt100_color(cell.bgcolor());
     let mut style = Style::default().fg(fg).bg(bg);
-    if cell.bold()      { style = style.add_modifier(Modifier::BOLD); }
-    if cell.italic()    { style = style.add_modifier(Modifier::ITALIC); }
-    if cell.underline() { style = style.add_modifier(Modifier::UNDERLINED); }
-    if cell.inverse()   { style = style.add_modifier(Modifier::REVERSED); }
+    if cell.bold() {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if cell.italic() {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    if cell.underline() {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    if cell.inverse() {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
     style
 }
 
 pub fn vt100_color(color: vt100::Color) -> Color {
     match color {
-        vt100::Color::Default      => Color::Reset,
-        vt100::Color::Idx(n)       => Color::Indexed(n),
+        vt100::Color::Default => Color::Reset,
+        vt100::Color::Idx(n) => Color::Indexed(n),
         vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
     }
 }
@@ -223,42 +233,46 @@ pub fn vt100_color(color: vt100::Color) -> Color {
 /// Convert a crossterm key event into the byte sequence a terminal would send.
 pub fn key_to_bytes(key: KeyEvent) -> Vec<u8> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    let alt  = key.modifiers.contains(KeyModifiers::ALT);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
 
     let mut bytes: Vec<u8> = match key.code {
         KeyCode::Char(c) if ctrl => {
             let c = c.to_ascii_lowercase();
-            if c.is_ascii_lowercase() { vec![c as u8 - b'a' + 1] }
-            else if c == ' '            { vec![0] }
-            else                        { vec![] }
+            if c.is_ascii_lowercase() {
+                vec![c as u8 - b'a' + 1]
+            } else if c == ' ' {
+                vec![0]
+            } else {
+                vec![]
+            }
         }
         KeyCode::Char(c) => {
             let mut buf = [0u8; 4];
             c.encode_utf8(&mut buf).as_bytes().to_vec()
         }
-        KeyCode::Enter     => vec![b'\r'],
+        KeyCode::Enter => vec![b'\r'],
         KeyCode::Backspace => vec![0x7f],
-        KeyCode::Delete    => vec![0x1b, b'[', b'3', b'~'],
-        KeyCode::Esc       => vec![0x1b],
-        KeyCode::Tab       => vec![b'\t'],
-        KeyCode::BackTab   => vec![0x1b, b'[', b'Z'],
-        KeyCode::Up        => vec![0x1b, b'[', b'A'],
-        KeyCode::Down      => vec![0x1b, b'[', b'B'],
-        KeyCode::Right     => vec![0x1b, b'[', b'C'],
-        KeyCode::Left      => vec![0x1b, b'[', b'D'],
-        KeyCode::Home      => vec![0x1b, b'[', b'H'],
-        KeyCode::End       => vec![0x1b, b'[', b'F'],
-        KeyCode::PageUp    => vec![0x1b, b'[', b'5', b'~'],
-        KeyCode::PageDown  => vec![0x1b, b'[', b'6', b'~'],
-        KeyCode::F(1)  => vec![0x1b, b'O', b'P'],
-        KeyCode::F(2)  => vec![0x1b, b'O', b'Q'],
-        KeyCode::F(3)  => vec![0x1b, b'O', b'R'],
-        KeyCode::F(4)  => vec![0x1b, b'O', b'S'],
-        KeyCode::F(5)  => vec![0x1b, b'[', b'1', b'5', b'~'],
-        KeyCode::F(6)  => vec![0x1b, b'[', b'1', b'7', b'~'],
-        KeyCode::F(7)  => vec![0x1b, b'[', b'1', b'8', b'~'],
-        KeyCode::F(8)  => vec![0x1b, b'[', b'1', b'9', b'~'],
-        KeyCode::F(9)  => vec![0x1b, b'[', b'2', b'0', b'~'],
+        KeyCode::Delete => vec![0x1b, b'[', b'3', b'~'],
+        KeyCode::Esc => vec![0x1b],
+        KeyCode::Tab => vec![b'\t'],
+        KeyCode::BackTab => vec![0x1b, b'[', b'Z'],
+        KeyCode::Up => vec![0x1b, b'[', b'A'],
+        KeyCode::Down => vec![0x1b, b'[', b'B'],
+        KeyCode::Right => vec![0x1b, b'[', b'C'],
+        KeyCode::Left => vec![0x1b, b'[', b'D'],
+        KeyCode::Home => vec![0x1b, b'[', b'H'],
+        KeyCode::End => vec![0x1b, b'[', b'F'],
+        KeyCode::PageUp => vec![0x1b, b'[', b'5', b'~'],
+        KeyCode::PageDown => vec![0x1b, b'[', b'6', b'~'],
+        KeyCode::F(1) => vec![0x1b, b'O', b'P'],
+        KeyCode::F(2) => vec![0x1b, b'O', b'Q'],
+        KeyCode::F(3) => vec![0x1b, b'O', b'R'],
+        KeyCode::F(4) => vec![0x1b, b'O', b'S'],
+        KeyCode::F(5) => vec![0x1b, b'[', b'1', b'5', b'~'],
+        KeyCode::F(6) => vec![0x1b, b'[', b'1', b'7', b'~'],
+        KeyCode::F(7) => vec![0x1b, b'[', b'1', b'8', b'~'],
+        KeyCode::F(8) => vec![0x1b, b'[', b'1', b'9', b'~'],
+        KeyCode::F(9) => vec![0x1b, b'[', b'2', b'0', b'~'],
         KeyCode::F(10) => vec![0x1b, b'[', b'2', b'1', b'~'],
         KeyCode::F(11) => vec![0x1b, b'[', b'2', b'3', b'~'],
         KeyCode::F(12) => vec![0x1b, b'[', b'2', b'4', b'~'],

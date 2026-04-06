@@ -1,0 +1,7 @@
+#!/bin/sh
+file=""
+for arg in "$@"; do
+    file="$arg"
+done
+
+cat "$file"

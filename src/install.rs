@@ -16,7 +16,9 @@ pub fn which(cmd: &str) -> bool {
 }
 
 fn user_tmux_conf() -> Option<PathBuf> {
-    std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".tmux.conf"))
+    std::env::var("HOME")
+        .ok()
+        .map(|h| PathBuf::from(h).join(".tmux.conf"))
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -36,16 +38,16 @@ fn tmux_run_shell(cmd: &str) -> String {
 
 /// Detect the user's shell from $SHELL.
 fn detect_shell() -> Option<String> {
-    std::env::var("SHELL").ok().and_then(|s| {
-        s.rsplit('/').next().map(|n| n.to_string())
-    })
+    std::env::var("SHELL")
+        .ok()
+        .and_then(|s| s.rsplit('/').next().map(|n| n.to_string()))
 }
 
 /// Return the rc file path for the given shell.
 fn shell_rc(shell: &str) -> Option<PathBuf> {
     let home = home_dir()?;
     match shell {
-        "zsh"  => Some(home.join(".zshrc")),
+        "zsh" => Some(home.join(".zshrc")),
         "bash" => {
             // Keybindings belong in .bashrc (interactive shells), not .bash_profile (login shells).
             Some(home.join(".bashrc"))
@@ -89,7 +91,11 @@ fn add_shell_binding(rc_path: &Path, binding: &str) -> std::io::Result<()> {
     let content = fs::read_to_string(rc_path).unwrap_or_default();
     // Remove any existing tnote block first
     let cleaned = remove_shell_block(&content);
-    let mut f = fs::OpenOptions::new().create(true).write(true).truncate(true).open(rc_path)?;
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(rc_path)?;
     f.write_all(cleaned.as_bytes())?;
     if !cleaned.is_empty() && !cleaned.ends_with('\n') {
         writeln!(f)?;
@@ -99,7 +105,9 @@ fn add_shell_binding(rc_path: &Path, binding: &str) -> std::io::Result<()> {
 }
 
 fn remove_shell_binding(rc_path: &Path) -> std::io::Result<bool> {
-    let Ok(content) = fs::read_to_string(rc_path) else { return Ok(false); };
+    let Ok(content) = fs::read_to_string(rc_path) else {
+        return Ok(false);
+    };
     let cleaned = remove_shell_block(&content);
     if cleaned == content {
         return Ok(false);
@@ -137,7 +145,10 @@ pub fn add_source_line(user_conf: &Path, source_path: &Path) -> std::io::Result<
     if content.lines().any(|l| l.trim() == line) {
         return Ok(());
     }
-    let mut f = fs::OpenOptions::new().create(true).append(true).open(user_conf)?;
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(user_conf)?;
     if !content.is_empty() && !content.ends_with('\n') {
         writeln!(f)?;
     }
@@ -146,7 +157,9 @@ pub fn add_source_line(user_conf: &Path, source_path: &Path) -> std::io::Result<
 }
 
 pub fn remove_source_line(user_conf: &Path, source_path: &Path) -> std::io::Result<()> {
-    let Ok(content) = fs::read_to_string(user_conf) else { return Ok(()); };
+    let Ok(content) = fs::read_to_string(user_conf) else {
+        return Ok(());
+    };
     let line = format!("source-file {}", source_path.display());
     let filtered: Vec<&str> = content.lines().filter(|l| l.trim() != line).collect();
     let new_content = if content.ends_with('\n') {
@@ -162,13 +175,21 @@ pub fn remove_source_line(user_conf: &Path, source_path: &Path) -> std::io::Resu
 
 pub fn run(config: &Config) {
     if let Err(e) = fs::create_dir_all(&config.dir) {
-        eprintln!("tnote setup: failed to create {}: {}", config.dir.display(), e);
+        eprintln!(
+            "tnote setup: failed to create {}: {}",
+            config.dir.display(),
+            e
+        );
         std::process::exit(1);
     }
 
     let meta_dir = config.dir.join("meta");
     if let Err(e) = fs::create_dir_all(&meta_dir) {
-        eprintln!("tnote setup: failed to create {}: {}", meta_dir.display(), e);
+        eprintln!(
+            "tnote setup: failed to create {}: {}",
+            meta_dir.display(),
+            e
+        );
         std::process::exit(1);
     }
 
@@ -177,9 +198,10 @@ pub fn run(config: &Config) {
         let tmux_conf_path = meta_dir.join("tmux.conf");
 
         if let Ok(old) = fs::read_to_string(&tmux_conf_path) {
-            if let Some(old_key) = old.lines()
-                .find_map(|l| l.strip_prefix("bind-key ").and_then(|r| r.split_whitespace().next()))
-            {
+            if let Some(old_key) = old.lines().find_map(|l| {
+                l.strip_prefix("bind-key ")
+                    .and_then(|r| r.split_whitespace().next())
+            }) {
                 if old_key != config.key {
                     let _ = Command::new("tmux").args(["unbind-key", old_key]).status();
                 }
@@ -220,7 +242,11 @@ pub fn run(config: &Config) {
         );
 
         if let Err(e) = fs::write(&tmux_conf_path, &tmux_conf) {
-            eprintln!("tnote setup: failed to write {}: {}", tmux_conf_path.display(), e);
+            eprintln!(
+                "tnote setup: failed to write {}: {}",
+                tmux_conf_path.display(),
+                e
+            );
             std::process::exit(1);
         }
         println!("tnote setup: wrote {}", tmux_conf_path.display());
@@ -230,18 +256,30 @@ pub fn run(config: &Config) {
             .status();
 
         match status {
-            Ok(s) if s.success() => println!("tnote setup: sourced bindings into live tmux session"),
+            Ok(s) if s.success() => {
+                println!("tnote setup: sourced bindings into live tmux session")
+            }
             _ => eprintln!("tnote setup: tmux source-file failed"),
         }
 
         if let Some(user_conf) = user_tmux_conf() {
             match add_source_line(&user_conf, &tmux_conf_path) {
-                Ok(_) => println!("tnote setup: added source-file line to {}", user_conf.display()),
-                Err(e) => eprintln!("tnote setup: could not update {}: {}", user_conf.display(), e),
+                Ok(_) => println!(
+                    "tnote setup: added source-file line to {}",
+                    user_conf.display()
+                ),
+                Err(e) => eprintln!(
+                    "tnote setup: could not update {}: {}",
+                    user_conf.display(),
+                    e
+                ),
             }
         }
 
-        println!("tnote setup: tmux binding: prefix+{} opens/closes tnote popup", config.key);
+        println!(
+            "tnote setup: tmux binding: prefix+{} opens/closes tnote popup",
+            config.key
+        );
     }
 
     // ── shell keybinding ──────────────────────────────────────────────────
@@ -249,13 +287,23 @@ pub fn run(config: &Config) {
         if let (Some(rc), Some(binding)) = (shell_rc(&shell), shell_binding(&shell, &config.key)) {
             match add_shell_binding(&rc, &binding) {
                 Ok(_) => {
-                    println!("tnote setup: added Ctrl-{} binding to {}", config.key, rc.display());
-                    println!("tnote setup: restart your shell or run: source {}", rc.display());
+                    println!(
+                        "tnote setup: added Ctrl-{} binding to {}",
+                        config.key,
+                        rc.display()
+                    );
+                    println!(
+                        "tnote setup: restart your shell or run: source {}",
+                        rc.display()
+                    );
                 }
                 Err(e) => eprintln!("tnote setup: could not update {}: {}", rc.display(), e),
             }
         } else {
-            println!("tnote setup: unsupported shell '{}', skipping shell keybinding", shell);
+            println!(
+                "tnote setup: unsupported shell '{}', skipping shell keybinding",
+                shell
+            );
         }
     }
 
@@ -296,8 +344,15 @@ pub fn uninstall(config: &Config) {
 
     if let Some(user_conf) = user_tmux_conf() {
         match remove_source_line(&user_conf, &tmux_conf_path) {
-            Ok(_) => println!("tnote uninstall: removed source-file line from {}", user_conf.display()),
-            Err(e) => eprintln!("tnote uninstall: could not update {}: {}", user_conf.display(), e),
+            Ok(_) => println!(
+                "tnote uninstall: removed source-file line from {}",
+                user_conf.display()
+            ),
+            Err(e) => eprintln!(
+                "tnote uninstall: could not update {}: {}",
+                user_conf.display(),
+                e
+            ),
         }
     }
 
@@ -325,7 +380,7 @@ mod tests {
     fn add_source_line_creates_file_if_absent() {
         let tmp = tempfile::tempdir().unwrap();
         let conf = tmp.path().join(".tmux.conf");
-        let src  = tmp.path().join("meta/tmux.conf");
+        let src = tmp.path().join("meta/tmux.conf");
         add_source_line(&conf, &src).unwrap();
         let content = fs::read_to_string(&conf).unwrap();
         assert!(content.contains(&format!("source-file {}", src.display())));
@@ -335,7 +390,7 @@ mod tests {
     fn add_source_line_appends_to_existing_content() {
         let tmp = tempfile::tempdir().unwrap();
         let conf = tmp.path().join(".tmux.conf");
-        let src  = tmp.path().join("meta/tmux.conf");
+        let src = tmp.path().join("meta/tmux.conf");
         fs::write(&conf, "set -g mouse on\n").unwrap();
         add_source_line(&conf, &src).unwrap();
         let content = fs::read_to_string(&conf).unwrap();
@@ -347,11 +402,12 @@ mod tests {
     fn add_source_line_is_idempotent() {
         let tmp = tempfile::tempdir().unwrap();
         let conf = tmp.path().join(".tmux.conf");
-        let src  = tmp.path().join("meta/tmux.conf");
+        let src = tmp.path().join("meta/tmux.conf");
         add_source_line(&conf, &src).unwrap();
         add_source_line(&conf, &src).unwrap();
         let content = fs::read_to_string(&conf).unwrap();
-        let count = content.lines()
+        let count = content
+            .lines()
             .filter(|l| l.trim() == format!("source-file {}", src.display()))
             .count();
         assert_eq!(count, 1);
@@ -361,7 +417,7 @@ mod tests {
     fn add_source_line_adds_newline_before_if_file_lacks_trailing_newline() {
         let tmp = tempfile::tempdir().unwrap();
         let conf = tmp.path().join(".tmux.conf");
-        let src  = tmp.path().join("meta/tmux.conf");
+        let src = tmp.path().join("meta/tmux.conf");
         fs::write(&conf, "set -g mouse on").unwrap(); // no trailing newline
         add_source_line(&conf, &src).unwrap();
         let content = fs::read_to_string(&conf).unwrap();
@@ -375,8 +431,12 @@ mod tests {
     fn remove_source_line_removes_the_line() {
         let tmp = tempfile::tempdir().unwrap();
         let conf = tmp.path().join(".tmux.conf");
-        let src  = tmp.path().join("meta/tmux.conf");
-        fs::write(&conf, format!("set -g mouse on\nsource-file {}\n", src.display())).unwrap();
+        let src = tmp.path().join("meta/tmux.conf");
+        fs::write(
+            &conf,
+            format!("set -g mouse on\nsource-file {}\n", src.display()),
+        )
+        .unwrap();
         remove_source_line(&conf, &src).unwrap();
         let content = fs::read_to_string(&conf).unwrap();
         assert!(!content.contains(&format!("source-file {}", src.display())));
@@ -387,7 +447,7 @@ mod tests {
     fn remove_source_line_noop_when_line_absent() {
         let tmp = tempfile::tempdir().unwrap();
         let conf = tmp.path().join(".tmux.conf");
-        let src  = tmp.path().join("meta/tmux.conf");
+        let src = tmp.path().join("meta/tmux.conf");
         fs::write(&conf, "set -g mouse on\n").unwrap();
         remove_source_line(&conf, &src).unwrap();
         let content = fs::read_to_string(&conf).unwrap();
@@ -398,7 +458,7 @@ mod tests {
     fn remove_source_line_ok_when_file_does_not_exist() {
         let tmp = tempfile::tempdir().unwrap();
         let conf = tmp.path().join(".tmux.conf");
-        let src  = tmp.path().join("meta/tmux.conf");
+        let src = tmp.path().join("meta/tmux.conf");
         // conf does not exist — should not error
         remove_source_line(&conf, &src).unwrap();
     }
@@ -407,7 +467,7 @@ mod tests {
     fn remove_source_line_preserves_trailing_newline() {
         let tmp = tempfile::tempdir().unwrap();
         let conf = tmp.path().join(".tmux.conf");
-        let src  = tmp.path().join("meta/tmux.conf");
+        let src = tmp.path().join("meta/tmux.conf");
         fs::write(&conf, format!("a\nsource-file {}\nb\n", src.display())).unwrap();
         remove_source_line(&conf, &src).unwrap();
         let content = fs::read_to_string(&conf).unwrap();
@@ -492,7 +552,10 @@ mod tests {
 
     #[test]
     fn remove_shell_block_removes_marker_and_next_line() {
-        let content = format!("alias ls='ls -la'\n{}\nbindkey -s '\\C-t' 'tnote\\n'\nexport FOO=1\n", SHELL_MARKER);
+        let content = format!(
+            "alias ls='ls -la'\n{}\nbindkey -s '\\C-t' 'tnote\\n'\nexport FOO=1\n",
+            SHELL_MARKER
+        );
         let result = remove_shell_block(&content);
         assert_eq!(result, "alias ls='ls -la'\nexport FOO=1\n");
     }
@@ -521,7 +584,11 @@ mod tests {
     fn add_shell_binding_creates_file() {
         let tmp = tempfile::tempdir().unwrap();
         let rc = tmp.path().join(".zshrc");
-        add_shell_binding(&rc, "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'\nbindkey stuff").unwrap();
+        add_shell_binding(
+            &rc,
+            "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'\nbindkey stuff",
+        )
+        .unwrap();
         let content = fs::read_to_string(&rc).unwrap();
         assert!(content.contains(SHELL_MARKER));
         assert!(content.contains("bindkey stuff"));
@@ -532,7 +599,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let rc = tmp.path().join(".zshrc");
         fs::write(&rc, "export PATH=/usr/bin\n").unwrap();
-        add_shell_binding(&rc, "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'\nbindkey stuff").unwrap();
+        add_shell_binding(
+            &rc,
+            "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'\nbindkey stuff",
+        )
+        .unwrap();
         let content = fs::read_to_string(&rc).unwrap();
         assert!(content.starts_with("export PATH=/usr/bin\n"));
         assert!(content.contains("bindkey stuff"));
@@ -542,8 +613,16 @@ mod tests {
     fn add_shell_binding_replaces_existing_block() {
         let tmp = tempfile::tempdir().unwrap();
         let rc = tmp.path().join(".zshrc");
-        fs::write(&rc, format!("before\n{}\nold binding\nafter\n", SHELL_MARKER)).unwrap();
-        add_shell_binding(&rc, "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'\nnew binding").unwrap();
+        fs::write(
+            &rc,
+            format!("before\n{}\nold binding\nafter\n", SHELL_MARKER),
+        )
+        .unwrap();
+        add_shell_binding(
+            &rc,
+            "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'\nnew binding",
+        )
+        .unwrap();
         let content = fs::read_to_string(&rc).unwrap();
         assert!(!content.contains("old binding"));
         assert!(content.contains("new binding"));
@@ -555,7 +634,11 @@ mod tests {
     fn remove_shell_binding_removes_block() {
         let tmp = tempfile::tempdir().unwrap();
         let rc = tmp.path().join(".zshrc");
-        fs::write(&rc, format!("before\n{}\nbindkey stuff\nafter\n", SHELL_MARKER)).unwrap();
+        fs::write(
+            &rc,
+            format!("before\n{}\nbindkey stuff\nafter\n", SHELL_MARKER),
+        )
+        .unwrap();
         assert!(remove_shell_binding(&rc).unwrap());
         let content = fs::read_to_string(&rc).unwrap();
         assert!(!content.contains(SHELL_MARKER));
