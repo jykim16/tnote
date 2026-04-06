@@ -7,6 +7,7 @@ pub struct Config {
     pub height: String,
     pub key: String,
     pub editor: String,
+    pub renderer: Option<String>,
     pub ls_annotation: Option<String>,
 }
 
@@ -15,25 +16,41 @@ impl Config {
         let dir = std::env::var("TNOTE_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
-                let home = PathBuf::from(
-                    std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
-                );
-                let target    = home.join(".tnote");
-                let from_old  = home.join(".tnotes");
+                let home = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
+                let target = home.join(".tnote");
+                let from_old = home.join(".tnotes");
                 let from_old2 = home.join(".termnotes");
 
                 if !target.exists() {
                     if from_old.exists() {
                         if let Err(e) = std::fs::rename(&from_old, &target) {
-                            eprintln!("tnote: could not migrate {} → {}: {}", from_old.display(), target.display(), e);
+                            eprintln!(
+                                "tnote: could not migrate {} → {}: {}",
+                                from_old.display(),
+                                target.display(),
+                                e
+                            );
                         } else {
-                            eprintln!("tnote: migrated {} → {}", from_old.display(), target.display());
+                            eprintln!(
+                                "tnote: migrated {} → {}",
+                                from_old.display(),
+                                target.display()
+                            );
                         }
                     } else if from_old2.exists() {
                         if let Err(e) = std::fs::rename(&from_old2, &target) {
-                            eprintln!("tnote: could not migrate {} → {}: {}", from_old2.display(), target.display(), e);
+                            eprintln!(
+                                "tnote: could not migrate {} → {}: {}",
+                                from_old2.display(),
+                                target.display(),
+                                e
+                            );
                         } else {
-                            eprintln!("tnote: migrated {} → {}", from_old2.display(), target.display());
+                            eprintln!(
+                                "tnote: migrated {} → {}",
+                                from_old2.display(),
+                                target.display()
+                            );
                         }
                     }
                 }
@@ -42,15 +59,27 @@ impl Config {
 
         let file = read_config_file(&dir.join("meta").join("config"));
 
-        let ls_annotation = std::env::var("TNOTE_LS_ANNOTATION").ok()
+        let ls_annotation = std::env::var("TNOTE_LS_ANNOTATION")
+            .ok()
             .or_else(|| file.get("ls_annotation").cloned())
+            .filter(|s| !s.is_empty());
+        let renderer = std::env::var("TNOTE_RENDERER")
+            .ok()
+            .or_else(|| std::env::var("TNOTE_SHOW_RENDERER").ok())
+            .or_else(|| file.get("renderer").cloned())
+            .or_else(|| file.get("show_renderer").cloned())
             .filter(|s| !s.is_empty());
 
         Config {
-            width:  parse_str("TNOTE_WIDTH",  file.get("width").map(String::as_str),  "100%"),
-            height: parse_str("TNOTE_HEIGHT", file.get("height").map(String::as_str), "50%"),
-            key:    parse_str("TNOTE_KEY",    file.get("key").map(String::as_str),    "t"),
-            editor: parse_str("EDITOR",       file.get("editor").map(String::as_str), "vim"),
+            width: parse_str("TNOTE_WIDTH", file.get("width").map(String::as_str), "100%"),
+            height: parse_str(
+                "TNOTE_HEIGHT",
+                file.get("height").map(String::as_str),
+                "50%",
+            ),
+            key: parse_str("TNOTE_KEY", file.get("key").map(String::as_str), "t"),
+            editor: parse_str("EDITOR", file.get("editor").map(String::as_str), "vim"),
+            renderer,
             ls_annotation,
             dir,
         }
@@ -62,6 +91,9 @@ impl Config {
             "editor={}\nkey={}\nwidth={}\nheight={}\n",
             self.editor, self.key, self.width, self.height
         );
+        if let Some(ref renderer) = self.renderer {
+            content.push_str(&format!("renderer={}\n", renderer));
+        }
         if let Some(ref cmd) = self.ls_annotation {
             content.push_str(&format!("ls_annotation={}\n", cmd));
         }
@@ -82,7 +114,8 @@ pub fn read_config_file(path: &std::path::Path) -> HashMap<String, String> {
 }
 
 pub fn parse_str(env_key: &str, file_val: Option<&str>, default: &str) -> String {
-    std::env::var(env_key).ok()
+    std::env::var(env_key)
+        .ok()
         .or_else(|| file_val.map(str::to_string))
         .unwrap_or_else(|| default.to_string())
 }
@@ -150,11 +183,12 @@ mod tests {
     fn config_save_writes_all_fields() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = Config {
-            dir:    tmp.path().to_path_buf(),
+            dir: tmp.path().to_path_buf(),
             editor: "nano".to_string(),
-            key:    "n".to_string(),
-            width:  "100".to_string(),
+            key: "n".to_string(),
+            width: "100".to_string(),
             height: "30".to_string(),
+            renderer: None,
             ls_annotation: None,
         };
         cfg.save().unwrap();
@@ -169,11 +203,12 @@ mod tests {
     fn config_save_round_trips_via_read_config_file() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = Config {
-            dir:    tmp.path().to_path_buf(),
+            dir: tmp.path().to_path_buf(),
             editor: "hx".to_string(),
-            key:    "g".to_string(),
-            width:  "70".to_string(),
+            key: "g".to_string(),
+            width: "70".to_string(),
             height: "25".to_string(),
+            renderer: None,
             ls_annotation: None,
         };
         cfg.save().unwrap();
