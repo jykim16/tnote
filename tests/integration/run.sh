@@ -201,6 +201,56 @@ tmux run-shell 'TNOTE_DIR='"$TNOTE_DIR"' tnote name tmuxtest' 2>&1
 TMUX_PATH2=$(tmux run-shell 'TNOTE_DIR='"$TNOTE_DIR"' tnote path' 2>&1)
 echo "$TMUX_PATH2" | grep -q "named-tmuxtest.md" && pass "name in tmux" || fail "name in tmux"
 
+
+# manager-style spawn flow: create agent note file first, then bind the detached window from the manager shell
+AGENT_NOTE="$TNOTE_DIR/named-agent-manager-flow.md"
+cat <<'NOTE' > "$AGENT_NOTE"
+## Status: queued
+## Domain: tnote-skills
+## Workspace: /work
+## Goal: Validate manager spawn flow
+## Started: 2026-04-04
+
+---
+
+## In Progress
+
+## Queue
+- [ ] Start work
+
+## Blocked
+
+## Done
+
+---
+
+## Context
+
+### Background
+- Seeded by integration test.
+
+### Files
+- `skills/tnote-manager/SKILL.md`
+
+### Links
+- None
+
+### Dependencies
+- None
+
+---
+
+## Log
+### 2026-04-04
+- [manager] created note
+NOTE
+tmux new-window -d -t test-session: -n manager-spawn "TNOTE_DIR='$TNOTE_DIR' sh"
+sleep 1
+MANAGER_SPAWN_KEY=$(tmux display-message -p -t test-session:manager-spawn '#{session_id}+#{window_id}')
+tnote name agent-manager-flow --bind "$MANAGER_SPAWN_KEY" >/dev/null
+[ -f "$TNOTE_DIR/meta/tmux-${MANAGER_SPAWN_KEY}.link" ] && pass "manager spawn writes tmux link from manager shell" || fail "manager spawn writes tmux link from manager shell"
+grep -q "agent-manager-flow" "$TNOTE_DIR/meta/tmux-${MANAGER_SPAWN_KEY}.link" && pass "manager spawn stores agent note name" || fail "manager spawn stores agent note name"
+tmux kill-window -t test-session:manager-spawn 2>/dev/null || true
 # tnote list inside tmux
 echo "content" > "$TNOTE_DIR/named-tmuxtest.md"
 TMUX_LIST=$(tmux run-shell 'TNOTE_DIR='"$TNOTE_DIR"' tnote list' 2>&1)
@@ -216,6 +266,18 @@ echo "orphan" > "$TNOTE_DIR/shell-9999998.md"
 TMUX_CLEAN=$(tmux run-shell 'TNOTE_DIR='"$TNOTE_DIR"' tnote clean' 2>&1)
 echo "$TMUX_CLEAN" | grep -q "removed" && pass "clean in tmux" || fail "clean in tmux"
 
+
+# tnote __name-picker filter flow
+printf '' > "$TNOTE_DIR/named-alpha.md"
+printf '' > "$TNOTE_DIR/named-beta project.md"
+PICKER_TARGET="tmux-\$77+@3"
+tmux new-window -d -t test-session: -n picker "TNOTE_DIR='$TNOTE_DIR' tnote __name-picker '$PICKER_TARGET'"
+sleep 1
+tmux send-keys -t test-session:picker 'proj' Down Enter
+sleep 1
+[ -f "$TNOTE_DIR/meta/${PICKER_TARGET}.link" ] && pass "name picker filter writes tmux link" || fail "name picker filter writes tmux link"
+grep -q "beta project" "$TNOTE_DIR/meta/${PICKER_TARGET}.link" && pass "name picker filter selects filtered note" || fail "name picker filter selects filtered note"
+tmux kill-window -t test-session:picker 2>/dev/null || true
 # tnote open (popup) — in headless docker, display-popup fails (no client), so we just verify it doesn't crash
 TMUX_OPEN=$(tmux run-shell 'TNOTE_DIR='"$TNOTE_DIR"' EDITOR=true tnote 2>&1; echo "exit=$?"')
 # exit=0 means popup opened (real tmux), exit=1 means display-popup failed (headless) — both are acceptable
