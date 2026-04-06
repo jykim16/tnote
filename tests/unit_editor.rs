@@ -1,5 +1,5 @@
-use tnote::editor::{key_to_bytes, vt100_color};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tnote::editor::{key_to_bytes, vt100_color};
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -37,12 +37,18 @@ fn test_ctrl_chars() {
 
 #[test]
 fn test_ctrl_space() {
-    assert_eq!(key_to_bytes(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL)), vec![0]);
+    assert_eq!(
+        key_to_bytes(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL)),
+        vec![0]
+    );
 }
 
 #[test]
 fn test_ctrl_non_alpha_is_empty() {
-    assert_eq!(key_to_bytes(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::CONTROL)), vec![]);
+    assert_eq!(
+        key_to_bytes(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::CONTROL)),
+        vec![]
+    );
 }
 
 #[test]
@@ -57,7 +63,10 @@ fn test_backspace() {
 
 #[test]
 fn test_delete() {
-    assert_eq!(key_to_bytes(key(KeyCode::Delete)), vec![0x1b, b'[', b'3', b'~']);
+    assert_eq!(
+        key_to_bytes(key(KeyCode::Delete)),
+        vec![0x1b, b'[', b'3', b'~']
+    );
 }
 
 #[test]
@@ -77,38 +86,68 @@ fn test_back_tab() {
 
 #[test]
 fn test_arrow_keys() {
-    assert_eq!(key_to_bytes(key(KeyCode::Up)),    vec![0x1b, b'[', b'A']);
-    assert_eq!(key_to_bytes(key(KeyCode::Down)),  vec![0x1b, b'[', b'B']);
+    assert_eq!(key_to_bytes(key(KeyCode::Up)), vec![0x1b, b'[', b'A']);
+    assert_eq!(key_to_bytes(key(KeyCode::Down)), vec![0x1b, b'[', b'B']);
     assert_eq!(key_to_bytes(key(KeyCode::Right)), vec![0x1b, b'[', b'C']);
-    assert_eq!(key_to_bytes(key(KeyCode::Left)),  vec![0x1b, b'[', b'D']);
+    assert_eq!(key_to_bytes(key(KeyCode::Left)), vec![0x1b, b'[', b'D']);
 }
 
 #[test]
 fn test_home_end() {
     assert_eq!(key_to_bytes(key(KeyCode::Home)), vec![0x1b, b'[', b'H']);
-    assert_eq!(key_to_bytes(key(KeyCode::End)),  vec![0x1b, b'[', b'F']);
+    assert_eq!(key_to_bytes(key(KeyCode::End)), vec![0x1b, b'[', b'F']);
 }
 
 #[test]
 fn test_page_keys() {
-    assert_eq!(key_to_bytes(key(KeyCode::PageUp)),   vec![0x1b, b'[', b'5', b'~']);
-    assert_eq!(key_to_bytes(key(KeyCode::PageDown)), vec![0x1b, b'[', b'6', b'~']);
+    assert_eq!(
+        key_to_bytes(key(KeyCode::PageUp)),
+        vec![0x1b, b'[', b'5', b'~']
+    );
+    assert_eq!(
+        key_to_bytes(key(KeyCode::PageDown)),
+        vec![0x1b, b'[', b'6', b'~']
+    );
 }
 
 #[test]
 fn test_function_keys() {
-    assert_eq!(key_to_bytes(key(KeyCode::F(1))),  vec![0x1b, b'O', b'P']);
-    assert_eq!(key_to_bytes(key(KeyCode::F(2))),  vec![0x1b, b'O', b'Q']);
-    assert_eq!(key_to_bytes(key(KeyCode::F(3))),  vec![0x1b, b'O', b'R']);
-    assert_eq!(key_to_bytes(key(KeyCode::F(4))),  vec![0x1b, b'O', b'S']);
-    assert_eq!(key_to_bytes(key(KeyCode::F(5))),  vec![0x1b, b'[', b'1', b'5', b'~']);
-    assert_eq!(key_to_bytes(key(KeyCode::F(6))),  vec![0x1b, b'[', b'1', b'7', b'~']);
-    assert_eq!(key_to_bytes(key(KeyCode::F(7))),  vec![0x1b, b'[', b'1', b'8', b'~']);
-    assert_eq!(key_to_bytes(key(KeyCode::F(8))),  vec![0x1b, b'[', b'1', b'9', b'~']);
-    assert_eq!(key_to_bytes(key(KeyCode::F(9))),  vec![0x1b, b'[', b'2', b'0', b'~']);
-    assert_eq!(key_to_bytes(key(KeyCode::F(10))), vec![0x1b, b'[', b'2', b'1', b'~']);
-    assert_eq!(key_to_bytes(key(KeyCode::F(11))), vec![0x1b, b'[', b'2', b'3', b'~']);
-    assert_eq!(key_to_bytes(key(KeyCode::F(12))), vec![0x1b, b'[', b'2', b'4', b'~']);
+    assert_eq!(key_to_bytes(key(KeyCode::F(1))), vec![0x1b, b'O', b'P']);
+    assert_eq!(key_to_bytes(key(KeyCode::F(2))), vec![0x1b, b'O', b'Q']);
+    assert_eq!(key_to_bytes(key(KeyCode::F(3))), vec![0x1b, b'O', b'R']);
+    assert_eq!(key_to_bytes(key(KeyCode::F(4))), vec![0x1b, b'O', b'S']);
+    assert_eq!(
+        key_to_bytes(key(KeyCode::F(5))),
+        vec![0x1b, b'[', b'1', b'5', b'~']
+    );
+    assert_eq!(
+        key_to_bytes(key(KeyCode::F(6))),
+        vec![0x1b, b'[', b'1', b'7', b'~']
+    );
+    assert_eq!(
+        key_to_bytes(key(KeyCode::F(7))),
+        vec![0x1b, b'[', b'1', b'8', b'~']
+    );
+    assert_eq!(
+        key_to_bytes(key(KeyCode::F(8))),
+        vec![0x1b, b'[', b'1', b'9', b'~']
+    );
+    assert_eq!(
+        key_to_bytes(key(KeyCode::F(9))),
+        vec![0x1b, b'[', b'2', b'0', b'~']
+    );
+    assert_eq!(
+        key_to_bytes(key(KeyCode::F(10))),
+        vec![0x1b, b'[', b'2', b'1', b'~']
+    );
+    assert_eq!(
+        key_to_bytes(key(KeyCode::F(11))),
+        vec![0x1b, b'[', b'2', b'3', b'~']
+    );
+    assert_eq!(
+        key_to_bytes(key(KeyCode::F(12))),
+        vec![0x1b, b'[', b'2', b'4', b'~']
+    );
 }
 
 #[test]
@@ -133,12 +172,18 @@ fn test_unknown_key_empty() {
 
 #[test]
 fn test_vt100_color_default() {
-    assert_eq!(vt100_color(vt100::Color::Default), ratatui::style::Color::Reset);
+    assert_eq!(
+        vt100_color(vt100::Color::Default),
+        ratatui::style::Color::Reset
+    );
 }
 
 #[test]
 fn test_vt100_color_indexed() {
-    assert_eq!(vt100_color(vt100::Color::Idx(42)), ratatui::style::Color::Indexed(42));
+    assert_eq!(
+        vt100_color(vt100::Color::Idx(42)),
+        ratatui::style::Color::Indexed(42)
+    );
 }
 
 #[test]

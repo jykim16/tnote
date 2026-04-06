@@ -1,4 +1,6 @@
-use tnote::tmux::{shell_escape, is_in_tmux, window_label_map, window_display_label, live_window_keys};
+use tnote::tmux::{
+    is_in_tmux, live_window_keys, shell_escape, window_display_label, window_label_map,
+};
 
 // ── shell_escape ─────────────────────────────────────────────────────────────
 
