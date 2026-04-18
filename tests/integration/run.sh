@@ -175,11 +175,21 @@ grep -q "source-file" "$HOME/.tmux.conf" 2>/dev/null && pass "setup updates ~/.t
 # Verify tmux binding is live
 tmux show -s command-alias 2>/dev/null | grep -q "tnote" && pass "setup installs tmux aliases" || fail "setup installs tmux aliases"
 
+# Verify shell rc contains toggle function and precmd hook
+SHELL_RC="$HOME/.bashrc"
+grep -q "_tnote_toggle" "$SHELL_RC" 2>/dev/null && pass "setup writes _tnote_toggle to shell rc" || fail "setup writes _tnote_toggle to shell rc"
+grep -q "_tnote_precmd" "$SHELL_RC" 2>/dev/null && pass "setup writes _tnote_precmd to shell rc" || fail "setup writes _tnote_precmd to shell rc"
+grep -q "# end tnote keybinding" "$SHELL_RC" 2>/dev/null && pass "setup writes end marker to shell rc" || fail "setup writes end marker to shell rc"
+grep -q "PROMPT_COMMAND" "$SHELL_RC" 2>/dev/null && pass "setup wires PROMPT_COMMAND hook" || fail "setup wires PROMPT_COMMAND hook"
+
 # uninstall
 tnote uninstall 2>&1 | grep -q "complete" && pass "uninstall" || fail "uninstall"
 
 # Verify source-file line removed
 ! grep -q "source-file.*tnote" "$HOME/.tmux.conf" 2>/dev/null && pass "uninstall cleans ~/.tmux.conf" || fail "uninstall cleans ~/.tmux.conf"
+
+# Verify shell binding removed
+! grep -q "_tnote_toggle" "$SHELL_RC" 2>/dev/null && pass "uninstall removes _tnote_toggle" || fail "uninstall removes _tnote_toggle"
 
 echo ""
 
