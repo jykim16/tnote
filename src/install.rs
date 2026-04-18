@@ -66,19 +66,84 @@ fn shell_binding(shell: &str, key: &str) -> Option<String> {
     let ctrl_key = format!("\\C-{}", key);
     match shell {
         "zsh" => Some(format!(
-            "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'\n\
-             if [ -z \"$TMUX\" ]; then bindkey -s '{}' 'tnote\\n'; fi",
-            ctrl_key
+            "{marker}\n\
+             _tnote_toggle() {{\n\
+               local j p\n\
+               j=$(jobs -l 2>/dev/null | awk 'tolower($0)~/tnote/ && tolower($0)~/stop|suspend/ {{gsub(/[\\[\\]+-]/,\"\",$1);print $1;exit}}')\n\
+               p=$(jobs -l 2>/dev/null | awk '!/tnote/ && tolower($0)~/stop|suspend/ {{for(i=1;i<=NF;i++) if($i~/^[0-9]+$/ && $i+0>100){{print $i;exit}}}}')\n\
+               if [ -n \"$p\" ]; then echo \"$p\" > \"/tmp/tnote-swap-target-$$\"\n\
+               else rm -f \"/tmp/tnote-swap-target-$$\"; fi\n\
+               if [ -n \"$j\" ]; then fg %\"$j\"\n\
+               else tnote; fi\n\
+               zle reset-prompt\n\
+             }}\n\
+             _tnote_precmd() {{\n\
+               local f=\"/tmp/tnote-swap-$$\"\n\
+               [ -f \"$f\" ] || return\n\
+               local spid; spid=$(cat \"$f\"); rm -f \"$f\"\n\
+               [ -n \"$spid\" ] || return\n\
+               local j; j=$(jobs -l 2>/dev/null | awk -v p=\"$spid\" '$0~p && tolower($0)~/stop|suspend/ {{gsub(/[\\[\\]+-]/,\"\",$1);print $1;exit}}')\n\
+               [ -n \"$j\" ] && fg %\"$j\" 2>/dev/null\n\
+             }}\n\
+             zle -N _tnote_toggle\n\
+             precmd_functions+=(_tnote_precmd)\n\
+             if [ -z \"$TMUX\" ]; then bindkey '{ctrl_key}' _tnote_toggle; fi\n\
+             {end}",
+            marker = SHELL_MARKER,
+            ctrl_key = ctrl_key,
+            end = SHELL_END_MARKER,
         )),
         "bash" => Some(format!(
-            "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'\n\
-             if [ -z \"$TMUX\" ]; then bind '\"{}\":\"tnote\\n\"'; fi",
-            ctrl_key
+            "{marker}\n\
+             _tnote_toggle() {{\n\
+               local j p\n\
+               j=$(jobs -l 2>/dev/null | awk 'tolower($0)~/tnote/ && tolower($0)~/stop|suspend/ {{gsub(/[\\[\\]+-]/,\"\",$1);print $1;exit}}')\n\
+               p=$(jobs -l 2>/dev/null | awk '!/tnote/ && tolower($0)~/stop|suspend/ {{for(i=1;i<=NF;i++) if($i~/^[0-9]+$/ && $i+0>100){{print $i;exit}}}}')\n\
+               if [ -n \"$p\" ]; then echo \"$p\" > \"/tmp/tnote-swap-target-$$\"\n\
+               else rm -f \"/tmp/tnote-swap-target-$$\"; fi\n\
+               if [ -n \"$j\" ]; then fg %\"$j\"\n\
+               else tnote; fi\n\
+             }}\n\
+             _tnote_precmd() {{\n\
+               local f=\"/tmp/tnote-swap-$$\"\n\
+               [ -f \"$f\" ] || return\n\
+               local spid; spid=$(cat \"$f\"); rm -f \"$f\"\n\
+               [ -n \"$spid\" ] || return\n\
+               local j; j=$(jobs -l 2>/dev/null | awk -v p=\"$spid\" '$0~p && tolower($0)~/stop|suspend/ {{gsub(/[\\[\\]+-]/,\"\",$1);print $1;exit}}')\n\
+               [ -n \"$j\" ] && fg %\"$j\" 2>/dev/null\n\
+             }}\n\
+             if [ -z \"$PROMPT_COMMAND\" ]; then PROMPT_COMMAND=\"_tnote_precmd\"\n\
+             else PROMPT_COMMAND=\"_tnote_precmd; $PROMPT_COMMAND\"; fi\n\
+             if [ -z \"$TMUX\" ]; then bind -x '\"{ctrl_key}\":\"_tnote_toggle\"'; fi\n\
+             {end}",
+            marker = SHELL_MARKER,
+            ctrl_key = ctrl_key,
+            end = SHELL_END_MARKER,
         )),
         "fish" => Some(format!(
-            "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'\n\
-             if not set -q TMUX; bind \\c{} 'tnote; commandline -f repaint'; end",
-            key
+            "{marker}\n\
+             function _tnote_toggle\n\
+               set -l j (jobs 2>/dev/null | awk 'tolower($0)~/tnote/ && tolower($0)~/stop|suspend/ {{print NR;exit}}')\n\
+               set -l p (jobs 2>/dev/null | awk '!/tnote/ && tolower($0)~/stop|suspend/ {{print NR;exit}}')\n\
+               if test -n \"$p\"; echo \"$p\" > \"/tmp/tnote-swap-target-$fish_pid\"\n\
+               else rm -f \"/tmp/tnote-swap-target-$fish_pid\"; end\n\
+               if test -n \"$j\"; fg $j\n\
+               else tnote; end\n\
+               commandline -f repaint\n\
+             end\n\
+             function _tnote_precmd --on-event fish_prompt\n\
+               set -l f \"/tmp/tnote-swap-$fish_pid\"\n\
+               test -f \"$f\" || return\n\
+               set -l spid (cat \"$f\"); rm -f \"$f\"\n\
+               test -n \"$spid\" || return\n\
+               set -l j (jobs 2>/dev/null | awk -v p=\"$spid\" 'NR>1 && $0~p {{print NR-1;exit}}')\n\
+               test -n \"$j\"; and fg $j 2>/dev/null\n\
+             end\n\
+             if not set -q TMUX; bind \\c{key} '_tnote_toggle'; end\n\
+             {end}",
+            marker = SHELL_MARKER,
+            key = key,
+            end = SHELL_END_MARKER,
         )),
         _ => None,
     }
@@ -86,6 +151,7 @@ fn shell_binding(shell: &str, key: &str) -> Option<String> {
 
 /// Marker line used to identify the tnote block in shell rc files.
 const SHELL_MARKER: &str = "# tnote keybinding — managed by 'tnote setup' / 'tnote uninstall'";
+const SHELL_END_MARKER: &str = "# end tnote keybinding";
 
 fn add_shell_binding(rc_path: &Path, binding: &str) -> std::io::Result<()> {
     let content = fs::read_to_string(rc_path).unwrap_or_default();
@@ -116,22 +182,62 @@ fn remove_shell_binding(rc_path: &Path) -> std::io::Result<bool> {
     Ok(true)
 }
 
-/// Remove the tnote marker line and the line immediately following it.
+/// Remove the tnote keybinding block from shell rc content.
+///
+/// Supports two formats:
+/// - New (end-marker): removes all lines from SHELL_MARKER through SHELL_END_MARKER inclusive.
+/// - Legacy (no end-marker): removes SHELL_MARKER and exactly the one line after it.
 fn remove_shell_block(content: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
-    let mut result = Vec::new();
-    let mut skip_next = false;
-    for line in &lines {
-        if skip_next {
-            skip_next = false;
-            continue;
+    let mut result: Vec<&str> = Vec::new();
+
+    // Detect whether new end-marker format is present.
+    let has_end_marker = {
+        let mut found_start = false;
+        let mut found_end = false;
+        for line in &lines {
+            let t = line.trim();
+            if t == SHELL_MARKER {
+                found_start = true;
+            } else if found_start && t == SHELL_END_MARKER {
+                found_end = true;
+                break;
+            }
         }
-        if line.trim() == SHELL_MARKER {
-            skip_next = true;
-            continue;
+        found_start && found_end
+    };
+
+    if has_end_marker {
+        let mut in_block = false;
+        for line in &lines {
+            let t = line.trim();
+            if !in_block && t == SHELL_MARKER {
+                in_block = true;
+                continue;
+            }
+            if in_block {
+                if t == SHELL_END_MARKER {
+                    in_block = false;
+                }
+                continue;
+            }
+            result.push(line);
         }
-        result.push(*line);
+    } else {
+        let mut skip_next = false;
+        for line in &lines {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if line.trim() == SHELL_MARKER {
+                skip_next = true;
+                continue;
+            }
+            result.push(line);
+        }
     }
+
     let mut out = result.join("\n");
     if content.ends_with('\n') && !out.is_empty() {
         out.push('\n');
@@ -526,6 +632,9 @@ mod tests {
         assert!(b.contains("bindkey"));
         assert!(b.contains("\\C-t"));
         assert!(b.contains("TMUX"));
+        assert!(b.contains("_tnote_toggle"));
+        assert!(b.contains("_tnote_precmd"));
+        assert!(b.contains(SHELL_END_MARKER));
     }
 
     #[test]
@@ -534,6 +643,9 @@ mod tests {
         assert!(b.contains("bind"));
         assert!(b.contains("\\C-t"));
         assert!(b.contains("TMUX"));
+        assert!(b.contains("_tnote_toggle"));
+        assert!(b.contains("_tnote_precmd"));
+        assert!(b.contains(SHELL_END_MARKER));
     }
 
     #[test]
@@ -541,6 +653,21 @@ mod tests {
         let b = shell_binding("fish", "t").unwrap();
         assert!(b.contains("bind \\ct"));
         assert!(b.contains("TMUX"));
+        assert!(b.contains("_tnote_toggle"));
+        assert!(b.contains("_tnote_precmd"));
+        assert!(b.contains(SHELL_END_MARKER));
+    }
+
+    #[test]
+    fn remove_shell_block_removes_end_marked_block() {
+        let content = format!(
+            "before\n{}\n_tnote_toggle() {{}}\nbindkey stuff\n{}\nafter\n",
+            SHELL_MARKER, SHELL_END_MARKER
+        );
+        let result = remove_shell_block(&content);
+        assert_eq!(result, "before\nafter\n");
+        assert!(!result.contains("_tnote_toggle"));
+        assert!(!result.contains(SHELL_END_MARKER));
     }
 
     #[test]

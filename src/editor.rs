@@ -38,7 +38,7 @@ fn make_rect(width: &str, height: &str) -> io::Result<(Rect, u16, u16)> {
     Ok((rect, inner_w, inner_h))
 }
 
-pub fn run(file: &Path, label: &str, width: &str, height: &str) -> io::Result<()> {
+pub fn run(file: &Path, label: &str, width: &str, height: &str, hotkey: char) -> io::Result<()> {
     // Initial sizing for the PTY (pre-alternate-screen).
     let (_, init_iw, init_ih) = make_rect(width, height)?;
 
@@ -63,6 +63,7 @@ pub fn run(file: &Path, label: &str, width: &str, height: &str) -> io::Result<()
         .slave
         .spawn_command(cmd)
         .map_err(|e| io::Error::other(e.to_string()))?;
+    let child_pid: Option<u32> = child.process_id();
     drop(pair.slave);
 
     let mut pty_writer = pair
@@ -108,8 +109,8 @@ pub fn run(file: &Path, label: &str, width: &str, height: &str) -> io::Result<()
     // fullscreen) report a different size at this point.
     let (mut rect, mut inner_w, mut inner_h) = make_rect(width, height)?;
 
-    if let Some(bg) = background {
-        paint_background(&bg)?;
+    if let Some(bg) = background.as_deref() {
+        paint_background(bg)?;
     }
 
     // Pre-clear the popup rect.
@@ -174,6 +175,20 @@ pub fn run(file: &Path, label: &str, width: &str, height: &str) -> io::Result<()
         // Forward keyboard input to the PTY.
         if event::poll(Duration::from_millis(16))? {
             match event::read()? {
+                Event::Key(key)
+                    if key.code == KeyCode::Char(hotkey)
+                        && key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    handle_swap(child_pid, rect, background.as_deref())?;
+                    terminal.clear()?;
+                }
+                Event::Key(key)
+                    if key.code == KeyCode::Char('z')
+                        && key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    handle_suspend(child_pid, rect, background.as_deref())?;
+                    terminal.clear()?;
+                }
                 Event::Key(key) => {
                     let bytes = key_to_bytes(key);
                     if !bytes.is_empty() {
@@ -198,6 +213,80 @@ pub fn run(file: &Path, label: &str, width: &str, height: &str) -> io::Result<()
     let _ = child.wait();
     execute!(io::stdout(), LeaveAlternateScreen, cursor::Show)?;
     disable_raw_mode()?;
+    Ok(())
+}
+
+// ── Suspend / swap helpers ────────────────────────────────────────────────────
+
+fn repaint_after_resume(rect: Rect, bg: Option<&[u8]>) -> io::Result<()> {
+    if let Some(b) = bg {
+        paint_background(b)?;
+    }
+    execute!(io::stdout(), ratatui::crossterm::style::ResetColor)?;
+    let blank = " ".repeat(rect.width as usize);
+    for row in rect.y..rect.y + rect.height {
+        execute!(io::stdout(), cursor::MoveTo(rect.x, row))?;
+        write!(io::stdout(), "{}", blank)?;
+    }
+    io::stdout().flush()
+}
+
+/// Suspend tnote (and its PTY child) via SIGTSTP, resume on SIGCONT.
+/// No swap: the shell prompt appears after suspension.
+fn handle_suspend(child_pid: Option<u32>, rect: Rect, bg: Option<&[u8]>) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        execute!(io::stdout(), LeaveAlternateScreen, cursor::Show)?;
+        disable_raw_mode()?;
+        if let Some(pid) = child_pid {
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) };
+        }
+        unsafe { libc::raise(libc::SIGTSTP) }; // blocks until fg
+        // ── resumed ──────────────────────────────────────────────────────────
+        if let Some(pid) = child_pid {
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGCONT) };
+        }
+        enable_raw_mode()?;
+        execute!(io::stdout(), EnterAlternateScreen)?;
+        repaint_after_resume(rect, bg)?;
+    }
+    Ok(())
+}
+
+/// Suspend tnote and request an automatic swap to the previous job.
+///
+/// Reads the swap-target PID from `/tmp/tnote-swap-target-<ppid>` (written by
+/// the shell's `_tnote_toggle` before every `fg %tnote` or fresh launch).
+/// Writes a swap-request to `/tmp/tnote-swap-<ppid>` for the shell's
+/// `_tnote_precmd` hook to consume, which auto-fgs the other process.
+fn handle_swap(child_pid: Option<u32>, rect: Rect, bg: Option<&[u8]>) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let ppid = unsafe { libc::getppid() };
+        let swap_pid: Option<u32> =
+            std::fs::read_to_string(format!("/tmp/tnote-swap-target-{}", ppid))
+                .ok()
+                .and_then(|s| s.trim().parse().ok())
+                .filter(|&p: &u32| p > 0);
+
+        execute!(io::stdout(), LeaveAlternateScreen, cursor::Show)?;
+        disable_raw_mode()?;
+        if let Some(pid) = child_pid {
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) };
+        }
+        if let Some(spid) = swap_pid {
+            let _ = std::fs::write(format!("/tmp/tnote-swap-{}", ppid), format!("{}", spid));
+        }
+        unsafe { libc::raise(libc::SIGTSTP) }; // blocks until fg
+        // ── resumed ──────────────────────────────────────────────────────────
+        let _ = std::fs::remove_file(format!("/tmp/tnote-swap-{}", ppid));
+        if let Some(pid) = child_pid {
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGCONT) };
+        }
+        enable_raw_mode()?;
+        execute!(io::stdout(), EnterAlternateScreen)?;
+        repaint_after_resume(rect, bg)?;
+    }
     Ok(())
 }
 

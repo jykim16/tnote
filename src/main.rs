@@ -252,7 +252,13 @@ fn cmd_open(config: &Config, notes: &Notes, name: Option<&str>) {
     let result = if tmux::is_in_tmux() {
         tmux::open_popup_session(&file, &key, config)
     } else {
-        editor::run(&file, &label, &config.width, &config.height)
+        editor::run(
+            &file,
+            &label,
+            &config.width,
+            &config.height,
+            config.key.chars().next().unwrap_or('t'),
+        )
     };
 
     if let Err(e) = result {
