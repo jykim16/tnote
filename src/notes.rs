@@ -168,8 +168,8 @@ impl Notes {
                     || s.parse::<u32>().is_ok_and(|pid| !is_pid_alive(pid))
             } else if stem.starts_with("tmux-") {
                 // Superseded: a .link exists for this key, so the raw .md is redundant
-                let has_link = meta.join(format!("{}.link", &stem)).exists();
-                let md_exists = self.dir.join(format!("{}.md", &stem)).exists();
+                let has_link = meta.join(format!("{}.link", stem)).exists();
+                let md_exists = self.dir.join(format!("{}.md", stem)).exists();
                 (has_link && md_exists)
                     || matches!(scope, Some(ClearScope::Tmux) | Some(ClearScope::All))
                     || !live_windows.contains(&stem)
@@ -181,14 +181,14 @@ impl Notes {
 
             if dead {
                 if !dry_run {
-                    let _ = fs::remove_file(self.dir.join(format!("{}.md", &stem)));
+                    let _ = fs::remove_file(self.dir.join(format!("{}.md", stem)));
                     // Only remove the .link if the window is truly gone (not just superseded)
                     let superseded_only = stem.starts_with("tmux-")
-                        && meta.join(format!("{}.link", &stem)).exists()
+                        && meta.join(format!("{}.link", stem)).exists()
                         && live_windows.contains(&stem);
                     if !superseded_only {
-                        let _ = fs::remove_file(meta.join(format!("{}.link", &stem)));
-                        let _ = fs::remove_file(meta.join(format!("{}.pid", &stem)));
+                        let _ = fs::remove_file(meta.join(format!("{}.link", stem)));
+                        let _ = fs::remove_file(meta.join(format!("{}.pid", stem)));
                     }
                 }
                 removed.push(stem);

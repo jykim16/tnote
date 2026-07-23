@@ -2,8 +2,16 @@
 
 ## Before you begin
 
-- All changes are on the main branch and CI is green.
+- All changes are on the main branch. Check the *actual* latest CI run for `main` (e.g. `gh run list --branch main --limit 1`) - don't assume it's green just because nobody mentioned otherwise. A tag pushed on top of an already-red main will just fail the same way.
 - `cargo test` passes locally.
+- `cargo clippy -- -D warnings` passes locally - this is the exact command CI runs. `cargo test` passing is not enough; clippy warnings-as-errors is a separate, easy-to-forget check that CI enforces on every push.
+- **Both are also verified on Linux, not just your local OS.** CI's `test` job is a matrix over `ubuntu-latest` and `macos-latest`; running the two checks above only on your own machine leaves the other platform unverified - and the Docker integration suite below does *not* cover this gap, since its Dockerfile only runs `cargo build --release`, never `cargo test`/`cargo clippy`. If developing on macOS, additionally run:
+  ```sh
+  docker run --rm -v "$PWD":/app -w /app rust:latest bash -c \
+    "rustup component add clippy && cargo test && cargo clippy -- -D warnings"
+  ```
+  (swap the base image/flags to mirror whatever the other matrix leg actually is if `ci.yml` changes).
+- The Docker integration suite passes locally: `docker build -f tests/integration/Dockerfile -t tnote-test . && docker run --rm tnote-test`.
 - `cargo install --path .` produces a working binary (`tnote --version` prints the expected version).
 
 ## 1. Decide the new version
