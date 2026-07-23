@@ -26,6 +26,7 @@ unset TMUX 2>/dev/null || true
 
 # help
 tnote help | grep -q "USAGE" && pass "help" || fail "help"
+tnote help | grep -q -- "--template" && pass "help documents --template" || fail "help documents --template"
 
 # path
 tnote path | grep -q ".md" && pass "path" || fail "path"
@@ -88,6 +89,64 @@ tnote name currentbound --unbind
 
 # name --unbind (wrong note)
 ! tnote name wrongnote --unbind 4242 2>/dev/null && pass "name --unbind wrong note exits nonzero" || fail "name --unbind wrong note exits nonzero"
+
+# name --template / tnote --template (file-based note templates, ~/.tnote/template-NAME.md)
+# Run in isolated scratch TNOTE_DIRs so the shared state built up above
+# (testproject, boundproject, etc.) isn't disturbed; restore TNOTE_DIR after.
+ORIG_TNOTE_DIR="$TNOTE_DIR"
+
+# name --template NAME saves this window's current note as a reusable template file
+export TNOTE_DIR=$(mktemp -d)
+NOTE=$(tnote path)
+mkdir -p "$(dirname "$NOTE")"
+echo "## Status: in-progress" > "$NOTE"
+tnote name --template savetest >/dev/null
+[ -f "$TNOTE_DIR/template-savetest.md" ] && pass "name --template saves template file" || fail "name --template saves template file"
+grep -q "## Status: in-progress" "$TNOTE_DIR/template-savetest.md" && pass "name --template saved content matches current note" || fail "name --template saved content matches current note"
+[ ! -f "$TNOTE_DIR/named-savetest.md" ] && pass "name --template does not create a named note" || fail "name --template does not create a named note"
+
+# name --template rejects being combined with a positional name or --bind/--unbind
+! tnote name someproj --template savetest 2>/dev/null && pass "name --template conflicts with positional name" || fail "name --template conflicts with positional name"
+! tnote name --template savetest --bind 2>/dev/null && pass "name --template conflicts with --bind" || fail "name --template conflicts with --bind"
+
+# --template / -t NAME (apply a saved template) errors when the template doesn't exist
+export TNOTE_DIR=$(mktemp -d)
+! tnote --template ghost-template 2>/dev/null && pass "--template missing template exits nonzero" || fail "--template missing template exits nonzero"
+ERR=$(tnote --template ghost-template 2>&1 >/dev/null || true)
+echo "$ERR" | grep -q "not found" && pass "--template missing template error message" || fail "--template missing template error message"
+
+# --template errors when the target note already has content, and leaves it untouched
+export TNOTE_DIR=$(mktemp -d)
+echo "template body" > "$TNOTE_DIR/template-savetest.md"
+NOTE=$(tnote path)
+mkdir -p "$(dirname "$NOTE")"
+echo "existing content" > "$NOTE"
+! tnote --template savetest 2>/dev/null && pass "--template refuses to overwrite existing content" || fail "--template refuses to overwrite existing content"
+grep -q "existing content" "$NOTE" && pass "--template leaves existing content untouched" || fail "--template leaves existing content untouched"
+
+# --force/-f overrides the refusal and overwrites. apply_template() writes the file
+# before opening the editor, so we only assert the write — not the exit code, since
+# opening a real editor pty can fail headlessly in some sandboxes (see cli.rs tests).
+tnote --force --template savetest >/dev/null 2>&1 || true
+grep -q "template body" "$NOTE" && pass "--force --template overwrites existing content" || fail "--force --template overwrites existing content"
+
+# combined short flags -ft NAME behave the same as --force --template NAME
+export TNOTE_DIR=$(mktemp -d)
+echo "template body 2" > "$TNOTE_DIR/template-savetest.md"
+NOTE=$(tnote path)
+mkdir -p "$(dirname "$NOTE")"
+echo "existing content" > "$NOTE"
+tnote -ft savetest >/dev/null 2>&1 || true
+grep -q "template body 2" "$NOTE" && pass "-ft NAME combined short flags apply and overwrite" || fail "-ft NAME combined short flags apply and overwrite"
+
+# --template applies cleanly to a fresh (empty) note
+export TNOTE_DIR=$(mktemp -d)
+echo "fresh template body" > "$TNOTE_DIR/template-savetest.md"
+NOTE=$(tnote path)
+tnote --template savetest >/dev/null 2>&1 || true
+grep -q "fresh template body" "$NOTE" && pass "--template applies to a fresh note" || fail "--template applies to a fresh note"
+
+export TNOTE_DIR="$ORIG_TNOTE_DIR"
 
 # clean --dryrun
 # Note: capture full output first rather than piping directly into
