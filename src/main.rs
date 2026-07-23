@@ -67,6 +67,12 @@ enum Cmd {
         #[arg(short = 'n', long)]
         name: Option<String>,
     },
+    /// Jump the current terminal to the tmux window bound to a named note
+    Goto {
+        /// Named note to jump to
+        #[arg(short = 'n', long)]
+        name: String,
+    },
     /// Remove notes not tied to a running process or window
     Clean {
         /// Also remove notes in the given category: unprefixed, named, tmux, all
@@ -159,6 +165,7 @@ fn main() {
             unbind.as_deref(),
         ),
         Some(Cmd::Show { name }) => cmd_show(&config, &notes, name.as_deref()),
+        Some(Cmd::Goto { name }) => cmd_goto(&notes, name),
         Some(Cmd::Clean {
             all,
             name,
@@ -476,6 +483,64 @@ fn cmd_name_target(notes: &Notes, window_key: &str, name: &str) {
             eprintln!("tnote name: error naming note: {}", e);
             std::process::exit(1);
         }
+    }
+}
+
+fn cmd_goto(notes: &Notes, name: &str) {
+    let sources = notes.link_sources();
+    let Some(keys) = sources.get(name) else {
+        eprintln!("tnote goto: named note '{}' not found or not bound to any window", name);
+        std::process::exit(1);
+    };
+
+    let live_windows = tmux::live_window_keys();
+    let live_keys: Vec<&String> = keys
+        .iter()
+        .filter(|k| {
+            if let Some(pid) = k.strip_prefix("shell-") {
+                pid.parse::<u32>().is_ok_and(notes::is_pid_alive)
+            } else if k.starts_with("tmux-") {
+                live_windows.contains(*k)
+            } else {
+                false
+            }
+        })
+        .collect();
+
+    if live_keys.is_empty() {
+        eprintln!(
+            "tnote goto: '{}' has no live bound window — run 'tnote clean' to remove the stale binding",
+            name
+        );
+        std::process::exit(1);
+    }
+
+    let tmux_keys: Vec<&&String> = live_keys.iter().filter(|k| k.starts_with("tmux-")).collect();
+
+    if tmux_keys.is_empty() {
+        eprintln!(
+            "tnote goto: '{}' is only bound to a shell session, not a tmux window — nothing to jump to",
+            name
+        );
+        std::process::exit(1);
+    }
+
+    if tmux_keys.len() > 1 {
+        eprintln!("tnote goto: '{}' is bound to multiple live windows:", name);
+        for k in &tmux_keys {
+            let label = tmux::window_display_label(k).unwrap_or_else(|| k.to_string());
+            eprintln!("  {}", label);
+        }
+        eprintln!(
+            "tnote goto: unbind the extras with 'tnote name {} --unbind <target>'",
+            name
+        );
+        std::process::exit(1);
+    }
+
+    if let Err(e) = tmux::goto_window(tmux_keys[0]) {
+        eprintln!("tnote goto: {}", e);
+        std::process::exit(1);
     }
 }
 
@@ -1211,6 +1276,7 @@ USAGE:
   tnote name <name> --unbind [key] Remove all bindings for a named note, or one specific binding
   tnote show                       Print note contents inline
   tnote show --name 'proj-*'       Print all notes matching a pattern (quote the glob)
+  tnote goto --name <name>         Jump the current terminal to a named note's bound tmux window
   tnote clean [--dryrun]           Remove orphaned notes and popup sessions
   tnote list / ls                  List all notes with line counts
   tnote path                       Print the note file path

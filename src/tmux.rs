@@ -331,13 +331,65 @@ pub fn prompt_name_for_target(window_key: &str) {
         .status();
 }
 
-fn tmux_rename_target_from_key(key: &str) -> Option<&str> {
+/// Split a "tmux-$1+@3" key into (session, window) tmux target tokens, e.g. ("$1", "@3").
+fn session_and_window_from_key(key: &str) -> Option<(&str, &str)> {
     let target = key.strip_prefix("tmux-")?;
-    let (_, window_id) = target.split_once('+')?;
-    if window_id.starts_with('@') {
-        Some(window_id)
+    let (session, window) = target.split_once('+')?;
+    if window.starts_with('@') {
+        Some((session, window))
     } else {
         None
+    }
+}
+
+fn tmux_rename_target_from_key(key: &str) -> Option<&str> {
+    session_and_window_from_key(key).map(|(_, window)| window)
+}
+
+/// Jump the current terminal to the tmux window identified by `key` (e.g. "tmux-$1+@3").
+/// Uses `switch-client` when already inside tmux, or `attach-session` otherwise. Both are
+/// chained after `select-window` (rather than relying on colon-separated session:window
+/// targets) since window IDs are unique server-wide and this mirrors the proven approach
+/// already used by `rename_window_target`.
+///
+/// Note: a process can inherit `$TMUX` (so `is_in_tmux()` is true) without being an
+/// attached client with a real controlling terminal — e.g. a script or agent subprocess
+/// that copies the env var but was never dispatched by tmux itself. `switch-client`'s
+/// client resolution in that case is not well-defined by tmux and could in principle
+/// affect an unrelated attached client. This was deliberately NOT guarded against here:
+/// checking `stdout.is_terminal()` looks like the obvious fix, but the existing
+/// `:tnote-show`/`:tnote-list` command-line aliases (install.rs `tmux_run_shell`) —
+/// tnote's own established pattern for real interactive in-tmux invocation — run via
+/// `run-shell`, which never gives the spawned command a tty on stdout either. A
+/// `:tnote-goto` alias built the same way would be blocked by that guard despite being
+/// a legitimate, client-associated invocation. The two cases are indistinguishable from
+/// inside the spawned process; disambiguating them would need something tmux doesn't
+/// expose to `run-shell` commands. Flagged in ROADMAP.md as an open item.
+pub fn goto_window(key: &str) -> io::Result<()> {
+    let Some((session, window)) = session_and_window_from_key(key) else {
+        return Err(io::Error::other(format!(
+            "'{}' is not a tmux window binding",
+            key
+        )));
+    };
+
+    let attach_cmd = if is_in_tmux() {
+        "switch-client"
+    } else {
+        "attach-session"
+    };
+
+    let status = Command::new("tmux")
+        .args(["select-window", "-t", window, ";", attach_cmd, "-t", session])
+        .status()?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "tmux {} failed (target window may no longer exist)",
+            attach_cmd
+        )))
     }
 }
 
@@ -470,5 +522,24 @@ mod tests {
     fn tmux_rename_target_from_key_rejects_invalid_key() {
         assert_eq!(tmux_rename_target_from_key("tmux-$1+3"), None);
         assert_eq!(tmux_rename_target_from_key("shell-1234"), None);
+    }
+
+    #[test]
+    fn session_and_window_from_key_splits_session_and_window() {
+        assert_eq!(
+            session_and_window_from_key("tmux-$1+@3"),
+            Some(("$1", "@3"))
+        );
+    }
+
+    #[test]
+    fn session_and_window_from_key_rejects_non_tmux_key() {
+        assert_eq!(session_and_window_from_key("shell-1234"), None);
+    }
+
+    #[test]
+    fn goto_window_rejects_shell_key() {
+        let err = goto_window("shell-1234").unwrap_err();
+        assert!(err.to_string().contains("not a tmux window binding"));
     }
 }

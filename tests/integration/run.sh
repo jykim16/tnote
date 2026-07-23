@@ -287,6 +287,47 @@ echo "orphan" > "$TNOTE_DIR/shell-9999998.md"
 TMUX_CLEAN=$(tmux run-shell 'TNOTE_DIR='"$TNOTE_DIR"' tnote clean' 2>&1)
 echo "$TMUX_CLEAN" | grep -q "removed" && pass "clean in tmux" || fail "clean in tmux"
 
+# tnote goto — unbound name exits nonzero
+GOTO_MISSING=$(tmux run-shell 'TNOTE_DIR='"$TNOTE_DIR"' tnote goto -n nosuchnote 2>&1; echo "exit=$?"')
+echo "$GOTO_MISSING" | grep -q "not found or not bound" && pass "goto missing note errors" || fail "goto missing note errors"
+echo "$GOTO_MISSING" | grep -q "exit=1" && pass "goto missing note exits nonzero" || fail "goto missing note exits nonzero"
+
+# tnote goto — bound only to a dead/stale tmux window
+tnote name gotostale --bind '$999+@999' >/dev/null
+GOTO_STALE=$(tmux run-shell 'TNOTE_DIR='"$TNOTE_DIR"' tnote goto -n gotostale 2>&1; echo "exit=$?"')
+echo "$GOTO_STALE" | grep -q "no live bound window" && pass "goto stale binding errors" || fail "goto stale binding errors"
+echo "$GOTO_STALE" | grep -q "exit=1" && pass "goto stale binding exits nonzero" || fail "goto stale binding exits nonzero"
+
+# tnote goto — bound only to a shell (pid) note, not a tmux window
+# (bind to this script's own PID so the liveness check finds it alive)
+tnote name gotoshell --bind "$$" >/dev/null
+GOTO_SHELL=$(tmux run-shell 'TNOTE_DIR='"$TNOTE_DIR"' tnote goto -n gotoshell 2>&1; echo "exit=$?"')
+echo "$GOTO_SHELL" | grep -q "not a tmux window" && pass "goto shell-only binding errors" || fail "goto shell-only binding errors"
+
+# tnote goto — bound to two live tmux windows is ambiguous
+tmux new-window -d -t test-session: -n goto-a "sh"
+tmux new-window -d -t test-session: -n goto-b "sh"
+GOTO_A_KEY=$(tmux display-message -p -t test-session:goto-a '#{session_id}+#{window_id}')
+GOTO_B_KEY=$(tmux display-message -p -t test-session:goto-b '#{session_id}+#{window_id}')
+tnote name gotoambiguous --bind "$GOTO_A_KEY" >/dev/null
+tnote name gotoambiguous --bind "$GOTO_B_KEY" >/dev/null
+GOTO_AMBIG=$(tmux run-shell 'TNOTE_DIR='"$TNOTE_DIR"' tnote goto -n gotoambiguous 2>&1; echo "exit=$?"')
+echo "$GOTO_AMBIG" | grep -q "bound to multiple live windows" && pass "goto ambiguous binding errors" || fail "goto ambiguous binding errors"
+
+# tnote goto — single live tmux window: select-window should switch test-session's
+# current window even though switch-client/attach-session then fails (no attached
+# client in headless docker), matching the same "no crash" acceptance as `tnote open`.
+tmux new-window -d -t test-session: -n goto-target "sh"
+GOTO_TARGET_KEY=$(tmux display-message -p -t test-session:goto-target '#{session_id}+#{window_id}')
+tnote name gototarget --bind "$GOTO_TARGET_KEY" >/dev/null
+tmux select-window -t test-session:0
+tmux run-shell 'TNOTE_DIR='"$TNOTE_DIR"' tnote goto -n gototarget' >/dev/null 2>&1 || true
+GOTO_CURRENT=$(tmux display-message -p -t test-session '#{window_name}')
+[ "$GOTO_CURRENT" = "goto-target" ] && pass "goto selects the bound window" || fail "goto selects the bound window"
+tmux kill-window -t test-session:goto-a 2>/dev/null || true
+tmux kill-window -t test-session:goto-b 2>/dev/null || true
+tmux kill-window -t test-session:goto-target 2>/dev/null || true
+
 # tnote __name-picker filter flow
 printf '' > "$TNOTE_DIR/named-alpha.md"
 printf '' > "$TNOTE_DIR/named-beta project.md"
