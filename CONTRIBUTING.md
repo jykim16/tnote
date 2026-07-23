@@ -1,5 +1,7 @@
 # Contributing to tnote
 
+See `ROADMAP.md` for planned feature directions if you're looking for ideas.
+
 ## Prerequisites
 
 - [Rust toolchain](https://rustup.rs/) (stable)
