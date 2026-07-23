@@ -30,6 +30,25 @@ aimed at that use case specifically.
   `git worktree` checkout, not the same shared clone the manager works in.
   Keeps parallel agents from colliding on uncommitted changes or branch
   state; the manager itself stays in the main working directory throughout.
+- **Land `tnote goto -n <name>`** — note-to-terminal navigation. Prototyped
+  and validated on `agent/tnote-research-goto`: jumps the caller's terminal
+  to a named note's bound tmux window via `select-window` chained with
+  `switch-client` (inside tmux) or `attach-session` (outside), reusing the
+  existing reverse name→key lookup (`Notes::link_sources`). Handles unbound
+  names, stale/dead bindings, shell-only bindings, and a name bound to
+  multiple live windows (all exit nonzero with a specific message) as
+  distinct cases. Known unresolved edge case, deliberately shipped
+  unguarded: a process that inherits `$TMUX` but was never dispatched by a
+  real tmux client (e.g. an agent's detached subprocess, a cron job) makes
+  `switch-client`'s client-resolution ambiguous — it could in principle
+  redirect an unrelated attached client instead of erroring. Tried gating
+  this on `stdout.is_terminal()`, but that would also break the legitimate
+  case: tnote's own `:tnote-show`/`:tnote-list` command-line aliases run via
+  `run-shell`, which never gives the spawned process a tty either, even
+  though it's a real client-dispatched invocation. The two cases aren't
+  distinguishable from inside the spawned process with anything tmux
+  exposes to `run-shell` commands — needs either a tmux-side signal or
+  accepting the risk.
 
 ## Mid-term
 
@@ -41,8 +60,6 @@ aimed at that use case specifically.
   notes that are older than specified in config --advanced
 - **LLM wiki + tnote exploration** - evaludate whether Karpathy's LLM wiki
   idea can combine cleanly with tnote
-- **tnote goto exploration** - evaludate note-to-terminal navigation,
-  including a tmux-style attach flow like `tnote a -t "<note>"`
 
 ## Long-term / needs more design
 
