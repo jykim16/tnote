@@ -22,12 +22,26 @@ curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-agent
 curl -sL https://raw.githubusercontent.com/jykim16/tnote/main/skills/tnote-manager/SKILL.md -o .claude/skills/tnote-manager/SKILL.md
 ```
 
-**Claude Code-specific frontmatter fields** — add these to each skill's frontmatter after installing:
+For live tnote updates, make sure Claude Code can access the default tnote note store and run tnote commands without repeated approval.
 
-| Skill | Additional fields |
-|---|---|
-| `tnote-agent` | `allowed-tools: Bash(tnote *)` |
-| `tnote-manager` | `argument-hint: [project-name]`, `allowed-tools: Bash(tnote *)` |
+If `~/.claude/settings.json` already exists, preserve its existing settings and merge in:
+
+```json
+{
+  "permissions": {
+    "additionalDirectories": [
+      "~/.tnote"
+    ],
+    "allow": [
+      "Bash(tnote *)"
+    ]
+  }
+}
+```
+
+If either array already exists, preserve its entries and add the new value instead of replacing the array.
+
+Add `argument-hint: [project-name]` to the `tnote-manager` skill's frontmatter after installing.
 
 ---
 

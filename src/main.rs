@@ -129,6 +129,13 @@ enum Cmd {
 }
 
 fn main() {
+    // Rust ignores SIGPIPE by default, which turns a closed downstream pipe
+    // (e.g. `tnote clean | grep -q ...`) into a panic instead of a clean
+    // exit. Restore the default disposition so broken pipes terminate quietly.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     let cli = Cli::parse();
     let config = Config::from_env();
     let notes = Notes::new(config.dir.clone());

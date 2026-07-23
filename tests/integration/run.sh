@@ -12,6 +12,7 @@ export TNOTE_DIR=$(mktemp -d)
 export EDITOR=vi
 export HOME=/root
 chmod +x /tnote/tests/bin/bat
+REAL_PATH="$PATH"
 export PATH="/tnote/tests/bin:$PATH"
 
 echo "=== tnote integration tests ($(tmux -V)) ==="
@@ -39,7 +40,10 @@ echo "hello world" > "$NOTE"
 tnote show | grep -q "hello world" && pass "show (content)" || fail "show (content)"
 
 # show (bat renderer)
-SHOW_BAT=$(TNOTE_RENDERER=bat tnote show 2>&1)
+# Note: no 2>&1 here - adding it forces bash to fork an extra subshell for
+# this command substitution, which changes tnote's getppid()-derived shell
+# identity mid-script and makes it see an unrelated empty note.
+SHOW_BAT=$(TNOTE_RENDERER=bat tnote show)
 echo "$SHOW_BAT" | grep -q "hello world" && pass "show (bat renderer)" || fail "show (bat renderer)"
 
 # list
@@ -86,11 +90,17 @@ tnote name currentbound --unbind
 ! tnote name wrongnote --unbind 4242 2>/dev/null && pass "name --unbind wrong note exits nonzero" || fail "name --unbind wrong note exits nonzero"
 
 # clean --dryrun
+# Note: capture full output first rather than piping directly into
+# `grep -q` - grep closing the pipe after its first match sends SIGPIPE to
+# tnote for any remaining output lines, and `pipefail` (set above) treats
+# that completely normal termination as a pipeline failure.
 echo "stale" > "$TNOTE_DIR/shell-9999999.md"
-tnote clean --dryrun | grep -q "would remove" && pass "clean --dryrun" || fail "clean --dryrun"
+CLEAN_DRYRUN=$(tnote clean --dryrun)
+echo "$CLEAN_DRYRUN" | grep -q "would remove" && pass "clean --dryrun" || fail "clean --dryrun"
 
 # clean
-tnote clean | grep -q "removed" && pass "clean" || fail "clean"
+CLEAN_OUT=$(tnote clean)
+echo "$CLEAN_OUT" | grep -q "removed" && pass "clean" || fail "clean"
 [ ! -f "$TNOTE_DIR/shell-9999999.md" ] && pass "clean removes file" || fail "clean removes file"
 
 # clean --name --archive --dryrun
@@ -154,6 +164,11 @@ echo ""
 # ── Setup and uninstall ───────────────────────────────────────────────────────
 
 echo "Setup/Uninstall:"
+
+# From here on we need the real tmux binary, not the fake stub used above -
+# both tnote's own internal `tmux ...` calls and this script's now need
+# genuine tmux behavior (live sessions, run-shell, display-message, etc.).
+export PATH="$REAL_PATH"
 
 # Start a tmux server
 tmux new-session -d -s test-session
