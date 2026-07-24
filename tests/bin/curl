@@ -1,0 +1,14 @@
+#!/bin/sh
+# Fake curl for testing `tnote upgrade` without hitting the network.
+# Set FAKE_CURL_LATEST_TAG to control what release tag "GitHub" reports.
+case "$*" in
+  *url_effective*)
+    echo "https://github.com/jykim16/tnote/releases/tag/${FAKE_CURL_LATEST_TAG:-v0.0.0}"
+    ;;
+  *tnote-installer.sh*)
+    echo 'echo "tnote upgrade: (stub) installer ran"'
+    ;;
+  *)
+    exit 0
+    ;;
+esac
