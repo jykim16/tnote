@@ -1,0 +1,23 @@
+name: Verify Release Install
+
+# Confirms tnote's latest published GitHub Release is actually installable
+# end-to-end via the real cargo-dist shell installer, on a clean machine.
+# This is intentionally separate from ci.yml: it targets the already-published
+# release artifacts (via the installer + GitHub API), not the current branch's
+# source, so it isn't meaningful on every push/PR.
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+jobs:
+  verify-install:
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install curl and tar/xz (needed by the release tarballs)
+        run: apt-get update && apt-get install -y curl ca-certificates xz-utils
+      - run: bash tests/integration/verify-install.sh
