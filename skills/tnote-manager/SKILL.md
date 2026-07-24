@@ -217,6 +217,16 @@ Replace `<agent-name>` in the kickoff message and in `SLUG`/`WORKSPACE` derivati
 Use `tnote name <agent-name> --bind "$WINDOW_KEY"` here because it binds the exact detached tmux window you just created, without relying on that window to run a command before the agent CLI starts.
 Do not combine the kickoff text and submit key in the same `tmux send-keys` call. Send the text first, then send a separate `C-m` so Codex, Kiro, Claude, and similar TUIs treat it as submit rather than inserting a newline into the composer.
 
+### Automode
+
+Before step 6, ask the user whether this agent should start in autonomous/no-prompt mode — an automode flag changes the spawned agent's own safety posture (fewer or no permission/approval prompts inside its session), so never enable one without an explicit yes for that spawn. Default to no flag (the harness's normal interactive prompting) if the user declines or doesn't answer.
+
+Known per-harness automode flags — use these when the user says yes:
+- **Claude Code**: `claude --permission-mode auto`
+- **Codex CLI**: `codex --full-auto`
+
+If `<agent-cli-command>` is a harness other than these two, ask the user for the correct flag rather than guessing one — automode flags vary by harness and by version, and guessing wrong can either silently no-op or bypass more than intended.
+
 After spawning, update the Agent Roster status and add a Log entry.
 
 ---
