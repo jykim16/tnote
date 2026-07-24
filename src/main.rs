@@ -63,7 +63,7 @@ enum Cmd {
     },
     /// Print note contents inline
     Show {
-        /// Show a specific named note
+        /// Show a specific named note, or all notes matching a glob pattern, e.g. -n 'proj-*' (quote the glob)
         #[arg(short = 'n', long)]
         name: Option<String>,
     },
@@ -72,7 +72,7 @@ enum Cmd {
         /// Also remove notes in the given category: unprefixed, named, tmux, all
         #[arg(long, value_name = "CATEGORY")]
         all: Option<ClearScope>,
-        /// Remove a specific named note by name
+        /// Remove a specific named note by name, or all notes matching a glob pattern, e.g. -n 'proj-*' (quote the glob)
         #[arg(short = 'n', long, value_name = "NAME")]
         name: Option<String>,
         /// Move to archive instead of deleting
@@ -91,10 +91,13 @@ enum Cmd {
         /// List archived notes instead
         #[arg(long)]
         archive: bool,
+        /// Only list notes matching a name, or a glob pattern, e.g. -n 'proj-*' (quote the glob)
+        #[arg(short = 'n', long)]
+        name: Option<String>,
     },
     /// Print the note file path
     Path {
-        /// Show path for a specific named note
+        /// Show path for a specific named note, or all notes matching a glob pattern, e.g. -n 'proj-*' (quote the glob)
         #[arg(short = 'n', long)]
         name: Option<String>,
     },
@@ -175,11 +178,11 @@ fn main() {
             *unarchive,
             *dryrun,
         ),
-        Some(Cmd::List { archive }) => {
+        Some(Cmd::List { archive, name }) => {
             if *archive {
-                cmd_list_archive(&notes);
+                cmd_list_archive(&notes, name.as_deref());
             } else {
-                cmd_list(&notes, &config);
+                cmd_list(&notes, &config, name.as_deref());
             }
         }
         Some(Cmd::Path { name }) => cmd_path(&notes, name.as_deref()),
@@ -599,25 +602,30 @@ fn glob_match(pattern: &str, text: &str) -> bool {
     }
 }
 
+/// Named notes whose name matches `pattern` (which must contain `*`), sorted.
+fn matching_named_notes(notes: &Notes, pattern: &str) -> Vec<String> {
+    notes
+        .named_note_names()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|stem| glob_match(pattern, stem))
+        .collect()
+}
+
+/// Archived named notes whose name matches `pattern` (which must contain `*`), sorted.
+fn matching_archived_notes(notes: &Notes, pattern: &str) -> Vec<String> {
+    notes
+        .archived_note_names()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|stem| glob_match(pattern, stem))
+        .collect()
+}
+
 fn cmd_show(config: &Config, notes: &Notes, name: Option<&str>) {
     if let Some(n) = name {
         if n.contains('*') {
-            let mut matches: Vec<String> = fs::read_dir(&notes.dir)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .filter_map(|e| {
-                    let fname = e.file_name();
-                    let s = fname.to_string_lossy();
-                    let stem = s.strip_prefix("named-")?.strip_suffix(".md")?;
-                    if glob_match(n, stem) {
-                        Some(stem.to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            matches.sort();
+            let matches = matching_named_notes(notes, n);
             if matches.is_empty() {
                 eprintln!("tnote show: no notes matching '{}'", n);
                 std::process::exit(1);
@@ -668,6 +676,48 @@ fn cmd_show(config: &Config, notes: &Notes, name: Option<&str>) {
     );
 }
 
+fn clean_one_named(notes: &Notes, name: &str, archive: bool, unarchive: bool, dry_run: bool) {
+    let result = if unarchive {
+        notes.unarchive_named(name, dry_run)
+    } else if archive {
+        notes.archive_named(name, dry_run)
+    } else {
+        notes.remove_named(name, dry_run)
+    };
+    match result {
+        Ok(true) => {
+            let verb = if dry_run {
+                if unarchive {
+                    "would unarchive"
+                } else if archive {
+                    "would archive"
+                } else {
+                    "would remove"
+                }
+            } else if unarchive {
+                "unarchived"
+            } else if archive {
+                "archived"
+            } else {
+                "removed"
+            };
+            println!(
+                "tnote clean: {} named note '{}'",
+                verb,
+                name.if_supports_color(Stdout, |t| t.yellow())
+            );
+        }
+        Ok(false) => {
+            eprintln!("tnote clean: named note '{}' not found", name);
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("tnote clean: {}", e.if_supports_color(Stderr, |t| t.red()));
+            std::process::exit(1);
+        }
+    }
+}
+
 fn cmd_clean(
     notes: &Notes,
     scope: Option<ClearScope>,
@@ -677,46 +727,22 @@ fn cmd_clean(
     dry_run: bool,
 ) {
     if let Some(name) = named {
-        let result = if unarchive {
-            notes.unarchive_named(name, dry_run)
-        } else if archive {
-            notes.archive_named(name, dry_run)
-        } else {
-            notes.remove_named(name, dry_run)
-        };
-        match result {
-            Ok(true) => {
-                let verb = if dry_run {
-                    if unarchive {
-                        "would unarchive"
-                    } else if archive {
-                        "would archive"
-                    } else {
-                        "would remove"
-                    }
-                } else if unarchive {
-                    "unarchived"
-                } else if archive {
-                    "archived"
-                } else {
-                    "removed"
-                };
-                println!(
-                    "tnote clean: {} named note '{}'",
-                    verb,
-                    name.if_supports_color(Stdout, |t| t.yellow())
-                );
-            }
-            Ok(false) => {
-                eprintln!("tnote clean: named note '{}' not found", name);
+        if name.contains('*') {
+            let matches = if unarchive {
+                matching_archived_notes(notes, name)
+            } else {
+                matching_named_notes(notes, name)
+            };
+            if matches.is_empty() {
+                eprintln!("tnote clean: no notes matching '{}'", name);
                 std::process::exit(1);
             }
-            Err(e) => {
-                eprintln!("tnote clean: {}", e.if_supports_color(Stderr, |t| t.red()));
-                std::process::exit(1);
+            for note_name in &matches {
+                clean_one_named(notes, note_name, archive, unarchive, dry_run);
             }
+            return;
         }
-
+        clean_one_named(notes, name, archive, unarchive, dry_run);
         return;
     }
 
@@ -774,13 +800,37 @@ fn run_annotation_cmd(cmd_template: &str, path: &std::path::Path) -> String {
     }
 }
 
-fn cmd_list(notes: &Notes, config: &Config) {
+/// Whether `candidate` matches a `--name` filter: glob if it contains `*`, exact otherwise.
+fn name_matches(filter: &str, candidate: &str) -> bool {
+    if filter.contains('*') {
+        glob_match(filter, candidate)
+    } else {
+        candidate == filter
+    }
+}
+
+fn cmd_list(notes: &Notes, config: &Config, name: Option<&str>) {
     let (_, current_file) = current_note(notes);
     match notes.list_notes() {
         Ok(list) => {
+            let list: Vec<_> = match name {
+                Some(n) => list
+                    .into_iter()
+                    .filter(|(_, display, _, _, _)| name_matches(n, display))
+                    .collect(),
+                None => list,
+            };
             if list.is_empty() {
-                println!("tnote list: (no notes yet)");
-                return;
+                match name {
+                    Some(n) => {
+                        eprintln!("tnote list: no notes matching '{}'", n);
+                        std::process::exit(1);
+                    }
+                    None => {
+                        println!("tnote list: (no notes yet)");
+                        return;
+                    }
+                }
             }
 
             struct Row {
@@ -893,7 +943,7 @@ fn cmd_list(notes: &Notes, config: &Config) {
     }
 }
 
-fn cmd_list_archive(notes: &Notes) {
+fn cmd_list_archive(notes: &Notes, name: Option<&str>) {
     let archive = notes.archive_dir();
     let entries = match std::fs::read_dir(&archive) {
         Ok(e) => e,
@@ -905,21 +955,34 @@ fn cmd_list_archive(notes: &Notes) {
     let mut items: Vec<(String, usize)> = entries
         .flatten()
         .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            let name = name
+            let note_name = e.file_name().to_string_lossy().to_string();
+            let note_name = note_name
                 .strip_prefix("named-")?
                 .strip_suffix(".md")?
                 .to_string();
+            if let Some(n) = name {
+                if !name_matches(n, &note_name) {
+                    return None;
+                }
+            }
             let lines = std::fs::read_to_string(e.path())
                 .unwrap_or_default()
                 .lines()
                 .count();
-            Some((name, lines))
+            Some((note_name, lines))
         })
         .collect();
     if items.is_empty() {
-        println!("tnote list: (no archived notes)");
-        return;
+        match name {
+            Some(n) => {
+                eprintln!("tnote list: no archived notes matching '{}'", n);
+                std::process::exit(1);
+            }
+            None => {
+                println!("tnote list: (no archived notes)");
+                return;
+            }
+        }
     }
     items.sort();
     let max_w = items.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
@@ -939,6 +1002,18 @@ fn cmd_list_archive(notes: &Notes) {
 
 fn cmd_path(notes: &Notes, name: Option<&str>) {
     if let Some(n) = name {
+        if n.contains('*') {
+            let matches = matching_named_notes(notes, n);
+            if matches.is_empty() {
+                eprintln!("tnote path: no notes matching '{}'", n);
+                std::process::exit(1);
+            }
+            for note_name in &matches {
+                let file = notes.dir.join(format!("named-{}.md", note_name));
+                println!("{}", file.display());
+            }
+            return;
+        }
         let file = notes.dir.join(format!("named-{}.md", n));
         if !file.exists() {
             eprintln!("tnote path: named note '{}' not found", n);
@@ -1213,10 +1288,11 @@ USAGE:
   tnote name <name> --bind [key]   Bind the current session, or one specific tmux/shell binding, to a named note
   tnote name <name> --unbind [key] Remove all bindings for a named note, or one specific binding
   tnote show                       Print note contents inline
-  tnote show --name 'proj-*'       Print all notes matching a pattern (quote the glob)
   tnote clean [--dryrun]           Remove orphaned notes and popup sessions
   tnote list / ls                  List all notes with line counts
   tnote path                       Print the note file path
+  tnote show|clean|list|path --name 'proj-*'
+                                   Match all named notes by pattern (quote the glob)
   tnote setup [--advanced]         Configure and install keybindings
   tnote uninstall                  Remove tmux and shell keybindings
   tnote upgrade                    Self-update to the latest GitHub release

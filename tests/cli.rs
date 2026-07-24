@@ -921,6 +921,135 @@ fn show_name_glob_mid_pattern() {
 }
 
 #[test]
+fn path_name_glob_matches_multiple_notes() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-proj-alpha.md"), "a\n").unwrap();
+    fs::write(dir.path().join("named-proj-beta.md"), "b\n").unwrap();
+    fs::write(dir.path().join("named-other.md"), "c\n").unwrap();
+    let output = tnote(dir.path())
+        .args(["path", "--name", "proj-*"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("named-proj-alpha.md"));
+    assert!(stdout.contains("named-proj-beta.md"));
+    assert!(!stdout.contains("named-other.md"));
+}
+
+#[test]
+fn path_name_glob_no_matches_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    let status = tnote(dir.path())
+        .args(["path", "--name", "ghost-*"])
+        .output()
+        .unwrap()
+        .status;
+    assert!(!status.success());
+}
+
+#[test]
+fn clean_name_glob_removes_matching_notes() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-proj-alpha.md"), "a\n").unwrap();
+    fs::write(dir.path().join("named-proj-beta.md"), "b\n").unwrap();
+    fs::write(dir.path().join("named-other.md"), "c\n").unwrap();
+    let output = tnote(dir.path())
+        .args(["clean", "--name", "proj-*"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("removed named note 'proj-alpha'"));
+    assert!(stdout.contains("removed named note 'proj-beta'"));
+    assert!(!dir.path().join("named-proj-alpha.md").exists());
+    assert!(!dir.path().join("named-proj-beta.md").exists());
+    assert!(dir.path().join("named-other.md").exists());
+}
+
+#[test]
+fn clean_name_glob_no_matches_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    let status = tnote(dir.path())
+        .args(["clean", "--name", "ghost-*", "--dryrun"])
+        .output()
+        .unwrap()
+        .status;
+    assert!(!status.success());
+}
+
+#[test]
+fn clean_name_glob_unarchive_matches_against_archive_dir() {
+    let dir = TempDir::new().unwrap();
+    let archive = dir.path().join("archive");
+    fs::create_dir_all(&archive).unwrap();
+    fs::write(archive.join("named-proj-alpha.md"), "a\n").unwrap();
+    fs::write(archive.join("named-proj-beta.md"), "b\n").unwrap();
+    // An active note with a matching name must not be picked up as if archived.
+    fs::write(dir.path().join("named-proj-gamma.md"), "g\n").unwrap();
+
+    let output = tnote(dir.path())
+        .args(["clean", "--name", "proj-*", "--unarchive"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("unarchived named note 'proj-alpha'"));
+    assert!(stdout.contains("unarchived named note 'proj-beta'"));
+    assert!(!stdout.contains("proj-gamma"));
+    assert!(dir.path().join("named-proj-alpha.md").exists());
+    assert!(dir.path().join("named-proj-beta.md").exists());
+    assert!(!archive.join("named-proj-alpha.md").exists());
+    assert!(!archive.join("named-proj-beta.md").exists());
+}
+
+#[test]
+fn list_name_filters_to_exact_match() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-proj-alpha.md"), "a\n").unwrap();
+    fs::write(dir.path().join("named-other.md"), "b\n").unwrap();
+    let out = stdout(&mut tnote(dir.path()).args(["list", "--name", "proj-alpha"]));
+    assert!(out.contains("proj-alpha"));
+    assert!(!out.contains("other"));
+}
+
+#[test]
+fn list_name_glob_filters_matching_notes() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-proj-alpha.md"), "a\n").unwrap();
+    fs::write(dir.path().join("named-proj-beta.md"), "b\n").unwrap();
+    fs::write(dir.path().join("named-other.md"), "c\n").unwrap();
+    let out = stdout(&mut tnote(dir.path()).args(["list", "--name", "proj-*"]));
+    assert!(out.contains("proj-alpha"));
+    assert!(out.contains("proj-beta"));
+    assert!(!out.contains("other"));
+}
+
+#[test]
+fn list_name_no_matches_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-proj-alpha.md"), "a\n").unwrap();
+    let status = tnote(dir.path())
+        .args(["list", "--name", "ghost-*"])
+        .output()
+        .unwrap()
+        .status;
+    assert!(!status.success());
+}
+
+#[test]
+fn list_archive_name_filters_matching_notes() {
+    let dir = TempDir::new().unwrap();
+    let archive = dir.path().join("archive");
+    fs::create_dir_all(&archive).unwrap();
+    fs::write(archive.join("named-proj-alpha.md"), "a\n").unwrap();
+    fs::write(archive.join("named-other.md"), "b\n").unwrap();
+    let out = stdout(&mut tnote(dir.path()).args(["list", "--archive", "--name", "proj-*"]));
+    assert!(out.contains("proj-alpha"));
+    assert!(!out.contains("other"));
+}
+
+#[test]
 fn ls_is_alias_for_list() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("named-foo.md"), "content\n").unwrap();
