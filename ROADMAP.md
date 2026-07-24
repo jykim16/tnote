@@ -36,9 +36,6 @@ aimed at that use case specifically.
 - **`--json` output** on `list`/`show` — agents currently scrape formatted
   text output; structured output is cheaper and less brittle for them to
   parse, and composes with `jq` for ad hoc queries.
-- **Archive retention policy** — auto-purge archived notes after N days,
-  rather than only manual `--archive`/`--unarchive`. on clean remove archived
-  notes that are older than specified in config --advanced
 - **LLM wiki + tnote exploration** - evaludate whether Karpathy's LLM wiki
   idea can combine cleanly with tnote
 - **tnote goto exploration** - evaludate note-to-terminal navigation,

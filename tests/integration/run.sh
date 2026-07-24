@@ -150,6 +150,24 @@ echo "old stuff" > "$TNOTE_DIR/archive/named-oldproject.md"
 tnote list --archive | grep -q "oldproject" && pass "list --archive (content)" || fail "list --archive (content)"
 rm -rf "$TNOTE_DIR/archive"
 
+# clean archive retention purge (opt-in via config; off by default)
+mkdir -p "$TNOTE_DIR/archive"
+echo "fresh" > "$TNOTE_DIR/archive/named-freshnote.md"
+echo "stale" > "$TNOTE_DIR/archive/named-stalenote.md"
+touch -d "40 days ago" "$TNOTE_DIR/archive/named-stalenote.md"
+
+tnote clean 2>&1 | grep -q "purged" && fail "purge disabled by default" || pass "purge disabled by default"
+[ -f "$TNOTE_DIR/archive/named-stalenote.md" ] && pass "stale note kept without retention config" || fail "stale note kept without retention config"
+
+TNOTE_ARCHIVE_RETENTION_DAYS=30 tnote clean --dryrun | grep -q "would purge archived note 'stalenote'" && pass "purge --dryrun message" || fail "purge --dryrun message"
+[ -f "$TNOTE_DIR/archive/named-stalenote.md" ] && pass "purge --dryrun keeps file" || fail "purge --dryrun keeps file"
+
+TNOTE_ARCHIVE_RETENTION_DAYS=30 tnote clean | grep -q "purged archived note 'stalenote'" && pass "purge message" || fail "purge message"
+[ ! -f "$TNOTE_DIR/archive/named-stalenote.md" ] && pass "purge removes stale archived note" || fail "purge removes stale archived note"
+[ -f "$TNOTE_DIR/archive/named-freshnote.md" ] && pass "purge keeps fresh archived note" || fail "purge keeps fresh archived note"
+
+rm -rf "$TNOTE_DIR/archive"
+
 # completions
 tnote completions bash | grep -q "complete" && pass "completions bash" || fail "completions bash"
 tnote completions zsh | grep -q "compdef" && pass "completions zsh" || fail "completions zsh"

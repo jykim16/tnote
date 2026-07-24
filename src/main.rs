@@ -172,6 +172,7 @@ fn main() {
             dryrun,
         }) => cmd_clean(
             &notes,
+            &config,
             all.clone(),
             name.as_deref(),
             *archive,
@@ -720,6 +721,7 @@ fn clean_one_named(notes: &Notes, name: &str, archive: bool, unarchive: bool, dr
 
 fn cmd_clean(
     notes: &Notes,
+    config: &Config,
     scope: Option<ClearScope>,
     named: Option<&str>,
     archive: bool,
@@ -776,6 +778,28 @@ fn cmd_clean(
             s.if_supports_color(Stdout, |t| t.yellow())
         );
         any = true;
+    }
+
+    if let Some(days) = config.archive_retention_days {
+        match notes.purge_archive(days, dry_run) {
+            Ok(purged) if !purged.is_empty() => {
+                let verb = if dry_run { "would purge" } else { "purged" };
+                for name in &purged {
+                    println!(
+                        "tnote clean: {} archived note '{}' (older than {} days)",
+                        verb,
+                        name.if_supports_color(Stdout, |t| t.yellow()),
+                        days
+                    );
+                }
+                any = true;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("tnote clean: {}", e.if_supports_color(Stderr, |t| t.red()));
+                std::process::exit(1);
+            }
+        }
     }
 
     if !any {
@@ -1171,7 +1195,7 @@ fn cmd_setup(config: &Config, advanced: bool) {
     let key = prompt("Key (tmux: prefix+?, shell: Ctrl+?)", &config.key);
     let width = prompt("Popup width  (e.g. 100%, 80)", &config.width);
     let height = prompt("Popup height (e.g. 50%, 22)", &config.height);
-    let (renderer, ls_annotation) = if advanced {
+    let (renderer, ls_annotation, archive_retention_days) = if advanced {
         let renderer = prompt_optional(
             "Renderer (e.g. bat; blank for plain output)",
             config.renderer.as_deref(),
@@ -1185,9 +1209,38 @@ fn cmd_setup(config: &Config, advanced: bool) {
             Some(annotation_raw)
         };
 
-        (renderer, ls_annotation)
+        let retention_default = config
+            .archive_retention_days
+            .map(|d| d.to_string())
+            .unwrap_or_default();
+        let archive_retention_days = loop {
+            let input = prompt_optional(
+                "Archive retention in days (blank to disable auto-purge)",
+                if retention_default.is_empty() {
+                    None
+                } else {
+                    Some(retention_default.as_str())
+                },
+            );
+            match input {
+                None => break None,
+                Some(s) => match s.parse::<u32>() {
+                    Ok(n) => break Some(n),
+                    Err(_) => {
+                        eprintln!("  please enter a whole number of days");
+                        continue;
+                    }
+                },
+            }
+        };
+
+        (renderer, ls_annotation, archive_retention_days)
     } else {
-        (config.renderer.clone(), config.ls_annotation.clone())
+        (
+            config.renderer.clone(),
+            config.ls_annotation.clone(),
+            config.archive_retention_days,
+        )
     };
 
     let new_config = Config {
@@ -1198,6 +1251,7 @@ fn cmd_setup(config: &Config, advanced: bool) {
         height,
         renderer,
         ls_annotation,
+        archive_retention_days,
     };
 
     if let Err(e) = new_config.save() {
