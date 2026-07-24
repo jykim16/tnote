@@ -417,6 +417,23 @@ impl Notes {
         names.sort();
         Ok(names)
     }
+
+    /// List all archived named note names in sorted order.
+    pub fn archived_note_names(&self) -> std::io::Result<Vec<String>> {
+        let mut names: Vec<String> = match fs::read_dir(self.archive_dir()) {
+            Ok(entries) => entries
+                .filter_map(|entry| {
+                    let path = entry.ok()?.path();
+                    let stem = path.file_stem()?.to_str()?;
+                    stem.strip_prefix("named-").map(|name| name.to_string())
+                })
+                .collect(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(e),
+        };
+        names.sort();
+        Ok(names)
+    }
 }
 
 pub fn is_pid_alive(pid: u32) -> bool {
@@ -799,5 +816,26 @@ mod tests {
             .find(|(c, d, _, _, _)| c == "named" && d == "work")
             .unwrap();
         assert_eq!(work.2, vec!["tmux-$1+@3"]);
+    }
+
+    // ── archived_note_names ──────────────────────────────────────────────────
+
+    #[test]
+    fn archived_note_names_no_archive_dir_returns_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        let names = notes.archived_note_names().unwrap();
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn archived_note_names_lists_sorted_stems() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::create_dir_all(notes.archive_dir()).unwrap();
+        fs::write(notes.archive_dir().join("named-zeta.md"), "z").unwrap();
+        fs::write(notes.archive_dir().join("named-alpha.md"), "a").unwrap();
+        let names = notes.archived_note_names().unwrap();
+        assert_eq!(names, vec!["alpha".to_string(), "zeta".to_string()]);
     }
 }
