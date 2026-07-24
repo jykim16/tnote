@@ -68,8 +68,8 @@ Pushing the tag triggers the cargo-dist CI workflow, which builds binaries for a
 Once CI finishes:
 
 1. Open the GitHub Releases page and confirm the release notes and attached binaries look correct.
-2. Run the shell installer on a clean machine (or a fresh shell session) and confirm `tnote --version` reports the new version.
-3. Run `tnote setup` on the test machine to confirm the tmux integration still works end-to-end.
+2. The `Verify Release Install` workflow (`.github/workflows/verify-release.yml`) runs automatically when the release is published - it curls the real shell installer in a clean container and confirms `tnote --version` reports the new version and a basic smoke command works. Check that it's green (`gh run list --workflow=verify-release.yml --limit 1`) rather than re-doing this by hand; only fall back to running the installer yourself if that workflow is red or didn't fire.
+3. Run `tnote setup` on a test machine to confirm the tmux integration still works end-to-end - this part is still manual, since it needs a live tmux session.
 
 ## 6. If something goes wrong
 
