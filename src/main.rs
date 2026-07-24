@@ -1,4 +1,4 @@
-use tnote::{config, editor, install, name_picker, notes, tmux};
+use tnote::{config, editor, install, name_picker, notes, tmux, upgrade};
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use config::Config;
@@ -106,6 +106,8 @@ enum Cmd {
     },
     /// Remove tmux and shell keybindings
     Uninstall,
+    /// Self-update tnote to the latest GitHub release
+    Upgrade,
     /// Show usage
     Help,
     /// Generate shell completions
@@ -183,6 +185,7 @@ fn main() {
         Some(Cmd::Path { name }) => cmd_path(&notes, name.as_deref()),
         Some(Cmd::Setup { advanced }) => cmd_setup(&config, *advanced),
         Some(Cmd::Uninstall) => install::uninstall(&config),
+        Some(Cmd::Upgrade) => upgrade::run(),
         Some(Cmd::Help) => print_help(),
         Some(Cmd::Completions { shell }) => cmd_completions(*shell),
         Some(Cmd::CompleteNamedNotes) => cmd_complete_named_notes(&notes),
@@ -1216,6 +1219,7 @@ USAGE:
   tnote path                       Print the note file path
   tnote setup [--advanced]         Configure and install keybindings
   tnote uninstall                  Remove tmux and shell keybindings
+  tnote upgrade                    Self-update to the latest GitHub release
   tnote help                       Show this help
 
 TMUX COMMAND LINE (works while a process is running):

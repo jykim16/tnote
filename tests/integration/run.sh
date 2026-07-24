@@ -11,7 +11,7 @@ fail() { FAIL=$((FAIL + 1)); ERRORS="${ERRORS}\n  ✗ $1"; echo "  ✗ $1"; }
 export TNOTE_DIR=$(mktemp -d)
 export EDITOR=vi
 export HOME=/root
-chmod +x /tnote/tests/bin/bat
+chmod +x /tnote/tests/bin/bat /tnote/tests/bin/curl /tnote/tests/bin/brew /tnote/tests/bin/cargo
 REAL_PATH="$PATH"
 export PATH="/tnote/tests/bin:$PATH"
 
@@ -158,6 +158,62 @@ tnote __complete-named-notes | grep -q "testproject" && pass "named note complet
 
 # version
 tnote --version | grep -q "tnote" && pass "--version" || fail "--version"
+
+echo ""
+
+# ── Upgrade ───────────────────────────────────────────────────────────────────
+
+echo "Upgrade:"
+
+# `tests/bin/curl` (still on PATH here, before it's reset to REAL_PATH below)
+# stubs the GitHub redirect so this never touches the network.
+CURRENT_VERSION=$(tnote --version | awk '{print $2}')
+
+FAKE_CURL_LATEST_TAG="v$CURRENT_VERSION" tnote upgrade 2>&1 | grep -q "already up to date" \
+  && pass "upgrade (already up to date)" || fail "upgrade (already up to date)"
+
+UPGRADE_OUT=$(FAKE_CURL_LATEST_TAG=v99.0.0 tnote upgrade 2>&1)
+echo "$UPGRADE_OUT" | grep -q "upgrading v$CURRENT_VERSION -> v99.0.0" && pass "upgrade (detects newer release)" || fail "upgrade (detects newer release)"
+echo "$UPGRADE_OUT" | grep -q "(stub) installer ran" && pass "upgrade (runs installer)" || fail "upgrade (runs installer)"
+echo "$UPGRADE_OUT" | grep -q "upgraded to v99.0.0" && pass "upgrade (reports success)" || fail "upgrade (reports success)"
+
+# Homebrew/cargo detection now checks that the *running binary itself*
+# lives under the reported install dir (not just "brew/cargo knows about
+# tnote somewhere") - so these tests copy the real binary into a fake
+# install dir and invoke it from there, rather than just stubbing the
+# brew/cargo output in isolation.
+TNOTE_BIN=$(command -v tnote)
+
+# Homebrew-managed install: should call `brew upgrade`, not the curl installer
+mkdir -p /fake/brew/opt/tnote/bin
+cp "$TNOTE_BIN" /fake/brew/opt/tnote/bin/tnote
+BREW_UPGRADE_OUT=$(FAKE_BREW_PREFIX=/fake/brew/opt/tnote FAKE_CURL_LATEST_TAG=v99.0.0 /fake/brew/opt/tnote/bin/tnote upgrade 2>&1)
+echo "$BREW_UPGRADE_OUT" | grep -q "via Homebrew" && pass "upgrade (detects Homebrew install)" || fail "upgrade (detects Homebrew install)"
+echo "$BREW_UPGRADE_OUT" | grep -q "(stub) brew upgrade ran" && pass "upgrade (runs brew upgrade)" || fail "upgrade (runs brew upgrade)"
+! echo "$BREW_UPGRADE_OUT" | grep -q "(stub) installer ran" && pass "upgrade (skips curl installer for brew installs)" || fail "upgrade (skips curl installer for brew installs)"
+
+# A brew prefix reported for tnote that the running binary does NOT actually
+# live under should NOT be treated as a Homebrew install (this is the "brew
+# knows about a tnote somewhere, but not this one" bug other self-updaters
+# have hit) - falls through to the curl installer instead.
+mkdir -p /fake/brew-other/opt/tnote/bin
+cp "$TNOTE_BIN" /fake/brew-other/opt/tnote/bin/tnote
+UNRELATED_BREW_OUT=$(FAKE_BREW_PREFIX=/fake/brew/opt/tnote FAKE_CURL_LATEST_TAG=v99.0.0 /fake/brew-other/opt/tnote/bin/tnote upgrade 2>&1)
+echo "$UNRELATED_BREW_OUT" | grep -q "(stub) installer ran" && pass "upgrade (ignores unrelated brew prefix)" || fail "upgrade (ignores unrelated brew prefix)"
+
+# cargo-install builds: neither packaged installer can safely take over, so
+# `tnote upgrade` should refuse rather than silently no-op.
+mkdir -p /fake/cargo-home/bin
+cp "$TNOTE_BIN" /fake/cargo-home/bin/tnote
+CARGO_UPGRADE_OUT=$(CARGO_HOME=/fake/cargo-home FAKE_CARGO_INSTALLED=1 FAKE_CURL_LATEST_TAG=v99.0.0 /fake/cargo-home/bin/tnote upgrade 2>&1) && CARGO_UPGRADE_STATUS=0 || CARGO_UPGRADE_STATUS=$?
+echo "$CARGO_UPGRADE_OUT" | grep -q "not a packaged release" && pass "upgrade (detects cargo install)" || fail "upgrade (detects cargo install)"
+[ "$CARGO_UPGRADE_STATUS" -ne 0 ] && pass "upgrade (cargo install exits nonzero)" || fail "upgrade (cargo install exits nonzero)"
+! echo "$CARGO_UPGRADE_OUT" | grep -qE "\(stub\) (installer|brew upgrade) ran" && pass "upgrade (skips packaged installers for cargo installs)" || fail "upgrade (skips packaged installers for cargo installs)"
+
+# Likewise: cargo claiming to know about tnote doesn't matter if the running
+# binary isn't actually sitting in cargo's bin dir.
+UNRELATED_CARGO_OUT=$(FAKE_CARGO_INSTALLED=1 FAKE_CURL_LATEST_TAG=v99.0.0 tnote upgrade 2>&1)
+echo "$UNRELATED_CARGO_OUT" | grep -q "(stub) installer ran" && pass "upgrade (ignores cargo when binary isn't in cargo's bin dir)" || fail "upgrade (ignores cargo when binary isn't in cargo's bin dir)"
 
 echo ""
 
