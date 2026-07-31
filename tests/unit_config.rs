@@ -84,6 +84,7 @@ fn test_save_writes_correct_format() {
         height: "30".into(),
         renderer: None,
         ls_annotation: None,
+        archive_retention_days: None,
     };
     cfg.save().unwrap();
     let content = std::fs::read_to_string(dir.path().join("meta").join("config")).unwrap();
@@ -105,6 +106,7 @@ fn test_save_round_trip() {
         height: "15".into(),
         renderer: Some("bat".into()),
         ls_annotation: None,
+        archive_retention_days: None,
     };
     cfg.save().unwrap();
 

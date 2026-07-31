@@ -1,4 +1,4 @@
-use tnote::{config, editor, install, name_picker, notes, tmux};
+use tnote::{config, editor, install, name_picker, notes, tmux, upgrade};
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use config::Config;
@@ -93,6 +93,14 @@ struct Cli {
     /// Open a specific named note
     #[arg(short = 'n', long)]
     name: Option<String>,
+
+    /// Populate the note with a saved template (see 'tnote name --template') if it has no content yet
+    #[arg(short = 't', long, value_name = "NAME")]
+    template: Option<String>,
+
+    /// With --template, overwrite existing note content instead of erroring
+    #[arg(short = 'f', long, requires = "template")]
+    force: bool,
 }
 
 #[derive(Subcommand)]
@@ -106,10 +114,13 @@ enum Cmd {
         /// Unbind all links for this named note, or a specific tmux window key / shell pid if provided
         #[arg(long, value_name = "TARGET", num_args = 0..=1, default_missing_value = CURRENT_TARGET_SENTINEL, conflicts_with = "bind")]
         unbind: Option<String>,
+        /// Save this window's current note content as a reusable template (~/.tnote/template-<NAME>.md)
+        #[arg(long, value_name = "NAME", conflicts_with_all = ["name", "bind", "unbind"])]
+        template: Option<String>,
     },
     /// Print note contents inline
     Show {
-        /// Show a specific named note
+        /// Show a specific named note, or all notes matching a glob pattern, e.g. -n 'proj-*' (quote the glob)
         #[arg(short = 'n', long)]
         name: Option<String>,
         /// Output structured JSON instead of formatted text
@@ -121,7 +132,7 @@ enum Cmd {
         /// Also remove notes in the given category: unprefixed, named, tmux, all
         #[arg(long, value_name = "CATEGORY")]
         all: Option<ClearScope>,
-        /// Remove a specific named note by name
+        /// Remove a specific named note by name, or all notes matching a glob pattern, e.g. -n 'proj-*' (quote the glob)
         #[arg(short = 'n', long, value_name = "NAME")]
         name: Option<String>,
         /// Move to archive instead of deleting
@@ -140,13 +151,16 @@ enum Cmd {
         /// List archived notes instead
         #[arg(long)]
         archive: bool,
+        /// Only list notes matching a name, or a glob pattern, e.g. -n 'proj-*' (quote the glob)
+        #[arg(short = 'n', long)]
+        name: Option<String>,
         /// Output structured JSON instead of formatted text
         #[arg(long)]
         json: bool,
     },
     /// Print the note file path
     Path {
-        /// Show path for a specific named note
+        /// Show path for a specific named note, or all notes matching a glob pattern, e.g. -n 'proj-*' (quote the glob)
         #[arg(short = 'n', long)]
         name: Option<String>,
     },
@@ -158,6 +172,8 @@ enum Cmd {
     },
     /// Remove tmux and shell keybindings
     Uninstall,
+    /// Self-update tnote to the latest GitHub release
+    Upgrade,
     /// Show usage
     Help,
     /// Generate shell completions
@@ -202,13 +218,25 @@ fn main() {
     }
 
     match &cli.command {
-        None => cmd_open(&config, &notes, cli.name.as_deref()),
-        Some(Cmd::Name { name, bind, unbind }) => cmd_name(
+        None => cmd_open(
+            &config,
+            &notes,
+            cli.name.as_deref(),
+            cli.template.as_deref(),
+            cli.force,
+        ),
+        Some(Cmd::Name {
+            name,
+            bind,
+            unbind,
+            template,
+        }) => cmd_name(
             &config,
             &notes,
             name.as_deref(),
             bind.as_deref(),
             unbind.as_deref(),
+            template.as_deref(),
         ),
         Some(Cmd::Show { name, json }) => cmd_show(&config, &notes, name.as_deref(), *json),
         Some(Cmd::Clean {
@@ -219,22 +247,24 @@ fn main() {
             dryrun,
         }) => cmd_clean(
             &notes,
+            &config,
             all.clone(),
             name.as_deref(),
             *archive,
             *unarchive,
             *dryrun,
         ),
-        Some(Cmd::List { archive, json }) => {
+        Some(Cmd::List { archive, name, json }) => {
             if *archive {
-                cmd_list_archive(&notes, *json);
+                cmd_list_archive(&notes, *json, name.as_deref());
             } else {
-                cmd_list(&notes, &config, *json);
+                cmd_list(&notes, &config, *json, name.as_deref());
             }
         }
         Some(Cmd::Path { name }) => cmd_path(&notes, name.as_deref()),
         Some(Cmd::Setup { advanced }) => cmd_setup(&config, *advanced),
         Some(Cmd::Uninstall) => install::uninstall(&config),
+        Some(Cmd::Upgrade) => upgrade::run(),
         Some(Cmd::Help) => print_help(),
         Some(Cmd::Completions { shell }) => cmd_completions(*shell),
         Some(Cmd::CompleteNamedNotes) => cmd_complete_named_notes(&notes),
@@ -283,9 +313,48 @@ fn named_or_current(notes: &Notes, name: Option<&str>) -> (String, PathBuf) {
     }
 }
 
+/// Path for a saved template: `~/.tnote/template-<name>.md`.
+fn template_path(notes: &Notes, template_name: &str) -> PathBuf {
+    notes.dir.join(format!("template-{}.md", template_name))
+}
+
+/// Copy a saved template's content onto `target`. Refuses to overwrite a target that
+/// already has content unless `force` is set.
+fn apply_template(
+    notes: &Notes,
+    target: &Path,
+    template_name: &str,
+    force: bool,
+) -> Result<(), String> {
+    let template_file = template_path(notes, template_name);
+    let content = fs::read_to_string(&template_file).map_err(|_| {
+        format!(
+            "template '{}' not found (expected {})",
+            template_name,
+            template_file.display()
+        )
+    })?;
+
+    let existing_len = fs::metadata(target).map(|m| m.len()).unwrap_or(0);
+    if existing_len > 0 && !force {
+        return Err(format!(
+            "file exists and has content — refusing to overwrite with template '{}' (use --force/-f to override)",
+            template_name
+        ));
+    }
+
+    fs::write(target, content).map_err(|e| e.to_string())
+}
+
 // ── Subcommands ───────────────────────────────────────────────────────────────
 
-fn cmd_open(config: &Config, notes: &Notes, name: Option<&str>) {
+fn cmd_open(
+    config: &Config,
+    notes: &Notes,
+    name: Option<&str>,
+    template: Option<&str>,
+    force: bool,
+) {
     // First-run hint
     if !config.dir.join("meta").join("config").exists() {
         eprintln!("tnote: tip — run 'tnote setup' to configure keybindings and editor");
@@ -304,7 +373,12 @@ fn cmd_open(config: &Config, notes: &Notes, name: Option<&str>) {
         None => notes.label_for_key(&key),
     };
 
-    if !file.exists() {
+    if let Some(template_name) = template {
+        if let Err(e) = apply_template(notes, &file, template_name, force) {
+            eprintln!("tnote: {}", e);
+            std::process::exit(1);
+        }
+    } else if !file.exists() {
         let _ = fs::write(&file, "");
     }
 
@@ -406,7 +480,24 @@ fn cmd_name(
     name: Option<&str>,
     bind: Option<&str>,
     unbind: Option<&str>,
+    template: Option<&str>,
 ) {
+    if let Some(template_name) = template {
+        let (_, file) = current_note(notes);
+        let content = fs::read_to_string(&file).unwrap_or_default();
+        match fs::write(template_path(notes, template_name), content) {
+            Ok(()) => println!("tnote name: saved template '{}'", template_name),
+            Err(e) => {
+                eprintln!(
+                    "tnote name: failed to save template '{}': {}",
+                    template_name, e
+                );
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     let Some(name) = name else {
         if tmux::is_in_tmux() {
             let window_key = current_note(notes).0;
@@ -648,25 +739,30 @@ fn glob_match(pattern: &str, text: &str) -> bool {
     }
 }
 
+/// Named notes whose name matches `pattern` (which must contain `*`), sorted.
+fn matching_named_notes(notes: &Notes, pattern: &str) -> Vec<String> {
+    notes
+        .named_note_names()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|stem| glob_match(pattern, stem))
+        .collect()
+}
+
+/// Archived named notes whose name matches `pattern` (which must contain `*`), sorted.
+fn matching_archived_notes(notes: &Notes, pattern: &str) -> Vec<String> {
+    notes
+        .archived_note_names()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|stem| glob_match(pattern, stem))
+        .collect()
+}
+
 fn cmd_show(config: &Config, notes: &Notes, name: Option<&str>, json: bool) {
     if let Some(n) = name {
         if n.contains('*') {
-            let mut matches: Vec<String> = fs::read_dir(&notes.dir)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .filter_map(|e| {
-                    let fname = e.file_name();
-                    let s = fname.to_string_lossy();
-                    let stem = s.strip_prefix("named-")?.strip_suffix(".md")?;
-                    if glob_match(n, stem) {
-                        Some(stem.to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            matches.sort();
+            let matches = matching_named_notes(notes, n);
             if matches.is_empty() {
                 eprintln!("tnote show: no notes matching '{}'", n);
                 std::process::exit(1);
@@ -764,8 +860,51 @@ fn show_named_note_json(notes: &Notes, n: &str) -> ShowEntryJson {
     }
 }
 
+fn clean_one_named(notes: &Notes, name: &str, archive: bool, unarchive: bool, dry_run: bool) {
+    let result = if unarchive {
+        notes.unarchive_named(name, dry_run)
+    } else if archive {
+        notes.archive_named(name, dry_run)
+    } else {
+        notes.remove_named(name, dry_run)
+    };
+    match result {
+        Ok(true) => {
+            let verb = if dry_run {
+                if unarchive {
+                    "would unarchive"
+                } else if archive {
+                    "would archive"
+                } else {
+                    "would remove"
+                }
+            } else if unarchive {
+                "unarchived"
+            } else if archive {
+                "archived"
+            } else {
+                "removed"
+            };
+            println!(
+                "tnote clean: {} named note '{}'",
+                verb,
+                name.if_supports_color(Stdout, |t| t.yellow())
+            );
+        }
+        Ok(false) => {
+            eprintln!("tnote clean: named note '{}' not found", name);
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("tnote clean: {}", e.if_supports_color(Stderr, |t| t.red()));
+            std::process::exit(1);
+        }
+    }
+}
+
 fn cmd_clean(
     notes: &Notes,
+    config: &Config,
     scope: Option<ClearScope>,
     named: Option<&str>,
     archive: bool,
@@ -773,46 +912,22 @@ fn cmd_clean(
     dry_run: bool,
 ) {
     if let Some(name) = named {
-        let result = if unarchive {
-            notes.unarchive_named(name, dry_run)
-        } else if archive {
-            notes.archive_named(name, dry_run)
-        } else {
-            notes.remove_named(name, dry_run)
-        };
-        match result {
-            Ok(true) => {
-                let verb = if dry_run {
-                    if unarchive {
-                        "would unarchive"
-                    } else if archive {
-                        "would archive"
-                    } else {
-                        "would remove"
-                    }
-                } else if unarchive {
-                    "unarchived"
-                } else if archive {
-                    "archived"
-                } else {
-                    "removed"
-                };
-                println!(
-                    "tnote clean: {} named note '{}'",
-                    verb,
-                    name.if_supports_color(Stdout, |t| t.yellow())
-                );
-            }
-            Ok(false) => {
-                eprintln!("tnote clean: named note '{}' not found", name);
+        if name.contains('*') {
+            let matches = if unarchive {
+                matching_archived_notes(notes, name)
+            } else {
+                matching_named_notes(notes, name)
+            };
+            if matches.is_empty() {
+                eprintln!("tnote clean: no notes matching '{}'", name);
                 std::process::exit(1);
             }
-            Err(e) => {
-                eprintln!("tnote clean: {}", e.if_supports_color(Stderr, |t| t.red()));
-                std::process::exit(1);
+            for note_name in &matches {
+                clean_one_named(notes, note_name, archive, unarchive, dry_run);
             }
+            return;
         }
-
+        clean_one_named(notes, name, archive, unarchive, dry_run);
         return;
     }
 
@@ -848,6 +963,28 @@ fn cmd_clean(
         any = true;
     }
 
+    if let Some(days) = config.archive_retention_days {
+        match notes.purge_archive(days, dry_run) {
+            Ok(purged) if !purged.is_empty() => {
+                let verb = if dry_run { "would purge" } else { "purged" };
+                for name in &purged {
+                    println!(
+                        "tnote clean: {} archived note '{}' (older than {} days)",
+                        verb,
+                        name.if_supports_color(Stdout, |t| t.yellow()),
+                        days
+                    );
+                }
+                any = true;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("tnote clean: {}", e.if_supports_color(Stderr, |t| t.red()));
+                std::process::exit(1);
+            }
+        }
+    }
+
     if !any {
         println!(
             "tnote clean: {}",
@@ -870,17 +1007,41 @@ fn run_annotation_cmd(cmd_template: &str, path: &std::path::Path) -> String {
     }
 }
 
-fn cmd_list(notes: &Notes, config: &Config, json: bool) {
+/// Whether `candidate` matches a `--name` filter: glob if it contains `*`, exact otherwise.
+fn name_matches(filter: &str, candidate: &str) -> bool {
+    if filter.contains('*') {
+        glob_match(filter, candidate)
+    } else {
+        candidate == filter
+    }
+}
+
+fn cmd_list(notes: &Notes, config: &Config, json: bool, name: Option<&str>) {
     let (_, current_file) = current_note(notes);
     match notes.list_notes() {
         Ok(list) => {
+            let list: Vec<_> = match name {
+                Some(n) => list
+                    .into_iter()
+                    .filter(|(_, display, _, _, _)| name_matches(n, display))
+                    .collect(),
+                None => list,
+            };
             if list.is_empty() {
-                if json {
-                    print_json(&Vec::<ListEntryJson>::new());
-                } else {
-                    println!("tnote list: (no notes yet)");
+                match name {
+                    Some(n) => {
+                        eprintln!("tnote list: no notes matching '{}'", n);
+                        std::process::exit(1);
+                    }
+                    None => {
+                        if json {
+                            print_json(&Vec::<ListEntryJson>::new());
+                        } else {
+                            println!("tnote list: (no notes yet)");
+                        }
+                        return;
+                    }
                 }
-                return;
             }
 
             if json {
@@ -1034,7 +1195,7 @@ fn cmd_list(notes: &Notes, config: &Config, json: bool) {
     }
 }
 
-fn cmd_list_archive(notes: &Notes, json: bool) {
+fn cmd_list_archive(notes: &Notes, json: bool, name: Option<&str>) {
     let archive = notes.archive_dir();
     let entries = match std::fs::read_dir(&archive) {
         Ok(e) => e,
@@ -1050,26 +1211,39 @@ fn cmd_list_archive(notes: &Notes, json: bool) {
     let mut items: Vec<(String, usize, PathBuf)> = entries
         .flatten()
         .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            let name = name
+            let note_name = e.file_name().to_string_lossy().to_string();
+            let note_name = note_name
                 .strip_prefix("named-")?
                 .strip_suffix(".md")?
                 .to_string();
+            if let Some(n) = name {
+                if !name_matches(n, &note_name) {
+                    return None;
+                }
+            }
             let path = e.path();
             let lines = std::fs::read_to_string(&path)
                 .unwrap_or_default()
                 .lines()
                 .count();
-            Some((name, lines, path))
+            Some((note_name, lines, path))
         })
         .collect();
     if items.is_empty() {
-        if json {
-            print_json(&Vec::<ArchiveEntryJson>::new());
-        } else {
-            println!("tnote list: (no archived notes)");
+        match name {
+            Some(n) => {
+                eprintln!("tnote list: no archived notes matching '{}'", n);
+                std::process::exit(1);
+            }
+            None => {
+                if json {
+                    print_json(&Vec::<ArchiveEntryJson>::new());
+                } else {
+                    println!("tnote list: (no archived notes)");
+                }
+                return;
+            }
         }
-        return;
     }
     items.sort();
 
@@ -1103,6 +1277,18 @@ fn cmd_list_archive(notes: &Notes, json: bool) {
 
 fn cmd_path(notes: &Notes, name: Option<&str>) {
     if let Some(n) = name {
+        if n.contains('*') {
+            let matches = matching_named_notes(notes, n);
+            if matches.is_empty() {
+                eprintln!("tnote path: no notes matching '{}'", n);
+                std::process::exit(1);
+            }
+            for note_name in &matches {
+                let file = notes.dir.join(format!("named-{}.md", note_name));
+                println!("{}", file.display());
+            }
+            return;
+        }
         let file = notes.dir.join(format!("named-{}.md", n));
         if !file.exists() {
             eprintln!("tnote path: named note '{}' not found", n);
@@ -1260,7 +1446,7 @@ fn cmd_setup(config: &Config, advanced: bool) {
     let key = prompt("Key (tmux: prefix+?, shell: Ctrl+?)", &config.key);
     let width = prompt("Popup width  (e.g. 100%, 80)", &config.width);
     let height = prompt("Popup height (e.g. 50%, 22)", &config.height);
-    let (renderer, ls_annotation) = if advanced {
+    let (renderer, ls_annotation, archive_retention_days) = if advanced {
         let renderer = prompt_optional(
             "Renderer (e.g. bat; blank for plain output)",
             config.renderer.as_deref(),
@@ -1274,9 +1460,38 @@ fn cmd_setup(config: &Config, advanced: bool) {
             Some(annotation_raw)
         };
 
-        (renderer, ls_annotation)
+        let retention_default = config
+            .archive_retention_days
+            .map(|d| d.to_string())
+            .unwrap_or_default();
+        let archive_retention_days = loop {
+            let input = prompt_optional(
+                "Archive retention in days (blank to disable auto-purge)",
+                if retention_default.is_empty() {
+                    None
+                } else {
+                    Some(retention_default.as_str())
+                },
+            );
+            match input {
+                None => break None,
+                Some(s) => match s.parse::<u32>() {
+                    Ok(n) => break Some(n),
+                    Err(_) => {
+                        eprintln!("  please enter a whole number of days");
+                        continue;
+                    }
+                },
+            }
+        };
+
+        (renderer, ls_annotation, archive_retention_days)
     } else {
-        (config.renderer.clone(), config.ls_annotation.clone())
+        (
+            config.renderer.clone(),
+            config.ls_annotation.clone(),
+            config.archive_retention_days,
+        )
     };
 
     let new_config = Config {
@@ -1287,6 +1502,7 @@ fn cmd_setup(config: &Config, advanced: bool) {
         height,
         renderer,
         ls_annotation,
+        archive_retention_days,
     };
 
     if let Err(e) = new_config.save() {
@@ -1376,13 +1592,18 @@ USAGE:
   tnote name [name]                Name or rebind this window's note (also renames the tmux window)
   tnote name <name> --bind [key]   Bind the current session, or one specific tmux/shell binding, to a named note
   tnote name <name> --unbind [key] Remove all bindings for a named note, or one specific binding
+  tnote name --template NAME       Save this window's current note as a template (~/.tnote/template-NAME.md)
+  tnote --template NAME / -t NAME  Populate this window's note from a saved template (errors if it has content)
+  tnote --force --template NAME    Overwrite existing content when applying a template (short: -f, -ft NAME)
   tnote show                       Print note contents inline
-  tnote show --name 'proj-*'       Print all notes matching a pattern (quote the glob)
   tnote clean [--dryrun]           Remove orphaned notes and popup sessions
   tnote list / ls                  List all notes with line counts
   tnote path                       Print the note file path
+  tnote show|clean|list|path --name 'proj-*'
+                                   Match all named notes by pattern (quote the glob)
   tnote setup [--advanced]         Configure and install keybindings
   tnote uninstall                  Remove tmux and shell keybindings
+  tnote upgrade                    Self-update to the latest GitHub release
   tnote help                       Show this help
 
 TMUX COMMAND LINE (works while a process is running):

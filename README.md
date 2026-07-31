@@ -125,6 +125,7 @@ Settings are read from `~/.tnote/meta/config` (written by `tnote setup`), with e
 | `TNOTE_HEIGHT`         | `50%`      | Popup height in lines or percent                     |
 | `TNOTE_RENDERER`       | empty      | Optional renderer for `tnote show` (`bat` currently) |
 | `TNOTE_LS_ANNOTATION`  | empty      | Optional shell command shown next to `tnote ls` rows |
+| `TNOTE_ARCHIVE_RETENTION_DAYS` | empty | Optional: auto-purge archived notes older than N days on `tnote clean` |
 
 The config file can also be edited directly:
 
@@ -142,6 +143,9 @@ Advanced config is optional. For example:
 # ~/.tnote/meta/config
 renderer=bat
 ls_annotation=head -1 {}
+archive_retention_days=30
 ```
 
 If `renderer` is unset or empty, `tnote show` uses the built-in plain output.
+
+If `archive_retention_days` is unset, archived notes are kept forever until manually removed. When set, every `tnote clean` (without `-n`) permanently deletes archived notes whose file hasn't been modified in more than that many days — unlike `--archive`, this is not reversible. Set it via `tnote setup --advanced`.

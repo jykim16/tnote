@@ -1,0 +1,16 @@
+#!/bin/sh
+# Fake brew for testing `tnote upgrade`'s Homebrew detection.
+# Set FAKE_BREW_PREFIX to the directory a "brew --prefix tnote" call should
+# report (the test arranges for the running tnote binary to actually live
+# under it, so the canonicalized-path check in upgrade.rs passes for real).
+case "$1 $2" in
+  "--prefix tnote")
+    [ -n "$FAKE_BREW_PREFIX" ] && echo "$FAKE_BREW_PREFIX" || exit 1
+    ;;
+  "upgrade tnote")
+    echo "tnote upgrade: (stub) brew upgrade ran"
+    ;;
+  *)
+    exit 1
+    ;;
+esac

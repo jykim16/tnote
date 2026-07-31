@@ -1,0 +1,15 @@
+#!/bin/sh
+# Fake cargo for testing `tnote upgrade`'s cargo-install detection.
+# Set FAKE_CARGO_INSTALLED=1 to simulate a `cargo install`-managed tnote binary.
+case "$1 $2" in
+  "install --list")
+    if [ "${FAKE_CARGO_INSTALLED:-0}" = "1" ]; then
+      echo "tnote v0.3.8 (/fake/checkout):"
+      echo "    tnote"
+    fi
+    exit 0
+    ;;
+  *)
+    exit 1
+    ;;
+esac

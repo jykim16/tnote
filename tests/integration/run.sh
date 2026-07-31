@@ -11,7 +11,7 @@ fail() { FAIL=$((FAIL + 1)); ERRORS="${ERRORS}\n  ✗ $1"; echo "  ✗ $1"; }
 export TNOTE_DIR=$(mktemp -d)
 export EDITOR=vi
 export HOME=/root
-chmod +x /tnote/tests/bin/bat
+chmod +x /tnote/tests/bin/bat /tnote/tests/bin/curl /tnote/tests/bin/brew /tnote/tests/bin/cargo
 REAL_PATH="$PATH"
 export PATH="/tnote/tests/bin:$PATH"
 
@@ -26,6 +26,7 @@ unset TMUX 2>/dev/null || true
 
 # help
 tnote help | grep -q "USAGE" && pass "help" || fail "help"
+tnote help | grep -q -- "--template" && pass "help documents --template" || fail "help documents --template"
 
 # path
 tnote path | grep -q ".md" && pass "path" || fail "path"
@@ -116,6 +117,64 @@ tnote name currentbound --unbind
 # name --unbind (wrong note)
 ! tnote name wrongnote --unbind 4242 2>/dev/null && pass "name --unbind wrong note exits nonzero" || fail "name --unbind wrong note exits nonzero"
 
+# name --template / tnote --template (file-based note templates, ~/.tnote/template-NAME.md)
+# Run in isolated scratch TNOTE_DIRs so the shared state built up above
+# (testproject, boundproject, etc.) isn't disturbed; restore TNOTE_DIR after.
+ORIG_TNOTE_DIR="$TNOTE_DIR"
+
+# name --template NAME saves this window's current note as a reusable template file
+export TNOTE_DIR=$(mktemp -d)
+NOTE=$(tnote path)
+mkdir -p "$(dirname "$NOTE")"
+echo "## Status: in-progress" > "$NOTE"
+tnote name --template savetest >/dev/null
+[ -f "$TNOTE_DIR/template-savetest.md" ] && pass "name --template saves template file" || fail "name --template saves template file"
+grep -q "## Status: in-progress" "$TNOTE_DIR/template-savetest.md" && pass "name --template saved content matches current note" || fail "name --template saved content matches current note"
+[ ! -f "$TNOTE_DIR/named-savetest.md" ] && pass "name --template does not create a named note" || fail "name --template does not create a named note"
+
+# name --template rejects being combined with a positional name or --bind/--unbind
+! tnote name someproj --template savetest 2>/dev/null && pass "name --template conflicts with positional name" || fail "name --template conflicts with positional name"
+! tnote name --template savetest --bind 2>/dev/null && pass "name --template conflicts with --bind" || fail "name --template conflicts with --bind"
+
+# --template / -t NAME (apply a saved template) errors when the template doesn't exist
+export TNOTE_DIR=$(mktemp -d)
+! tnote --template ghost-template 2>/dev/null && pass "--template missing template exits nonzero" || fail "--template missing template exits nonzero"
+ERR=$(tnote --template ghost-template 2>&1 >/dev/null || true)
+echo "$ERR" | grep -q "not found" && pass "--template missing template error message" || fail "--template missing template error message"
+
+# --template errors when the target note already has content, and leaves it untouched
+export TNOTE_DIR=$(mktemp -d)
+echo "template body" > "$TNOTE_DIR/template-savetest.md"
+NOTE=$(tnote path)
+mkdir -p "$(dirname "$NOTE")"
+echo "existing content" > "$NOTE"
+! tnote --template savetest 2>/dev/null && pass "--template refuses to overwrite existing content" || fail "--template refuses to overwrite existing content"
+grep -q "existing content" "$NOTE" && pass "--template leaves existing content untouched" || fail "--template leaves existing content untouched"
+
+# --force/-f overrides the refusal and overwrites. apply_template() writes the file
+# before opening the editor, so we only assert the write — not the exit code, since
+# opening a real editor pty can fail headlessly in some sandboxes (see cli.rs tests).
+tnote --force --template savetest >/dev/null 2>&1 || true
+grep -q "template body" "$NOTE" && pass "--force --template overwrites existing content" || fail "--force --template overwrites existing content"
+
+# combined short flags -ft NAME behave the same as --force --template NAME
+export TNOTE_DIR=$(mktemp -d)
+echo "template body 2" > "$TNOTE_DIR/template-savetest.md"
+NOTE=$(tnote path)
+mkdir -p "$(dirname "$NOTE")"
+echo "existing content" > "$NOTE"
+tnote -ft savetest >/dev/null 2>&1 || true
+grep -q "template body 2" "$NOTE" && pass "-ft NAME combined short flags apply and overwrite" || fail "-ft NAME combined short flags apply and overwrite"
+
+# --template applies cleanly to a fresh (empty) note
+export TNOTE_DIR=$(mktemp -d)
+echo "fresh template body" > "$TNOTE_DIR/template-savetest.md"
+NOTE=$(tnote path)
+tnote --template savetest >/dev/null 2>&1 || true
+grep -q "fresh template body" "$NOTE" && pass "--template applies to a fresh note" || fail "--template applies to a fresh note"
+
+export TNOTE_DIR="$ORIG_TNOTE_DIR"
+
 # clean --dryrun
 # Note: capture full output first rather than piping directly into
 # `grep -q` - grep closing the pipe after its first match sends SIGPIPE to
@@ -183,6 +242,24 @@ tnote list --archive | grep -q "oldproject" && pass "list --archive (content)" |
 tnote list --archive --json | jq -e 'any(.[]; .name == "oldproject" and .lines == 1)' >/dev/null && pass "list --archive --json (content)" || fail "list --archive --json (content)"
 rm -rf "$TNOTE_DIR/archive"
 
+# clean archive retention purge (opt-in via config; off by default)
+mkdir -p "$TNOTE_DIR/archive"
+echo "fresh" > "$TNOTE_DIR/archive/named-freshnote.md"
+echo "stale" > "$TNOTE_DIR/archive/named-stalenote.md"
+touch -d "40 days ago" "$TNOTE_DIR/archive/named-stalenote.md"
+
+tnote clean 2>&1 | grep -q "purged" && fail "purge disabled by default" || pass "purge disabled by default"
+[ -f "$TNOTE_DIR/archive/named-stalenote.md" ] && pass "stale note kept without retention config" || fail "stale note kept without retention config"
+
+TNOTE_ARCHIVE_RETENTION_DAYS=30 tnote clean --dryrun | grep -q "would purge archived note 'stalenote'" && pass "purge --dryrun message" || fail "purge --dryrun message"
+[ -f "$TNOTE_DIR/archive/named-stalenote.md" ] && pass "purge --dryrun keeps file" || fail "purge --dryrun keeps file"
+
+TNOTE_ARCHIVE_RETENTION_DAYS=30 tnote clean | grep -q "purged archived note 'stalenote'" && pass "purge message" || fail "purge message"
+[ ! -f "$TNOTE_DIR/archive/named-stalenote.md" ] && pass "purge removes stale archived note" || fail "purge removes stale archived note"
+[ -f "$TNOTE_DIR/archive/named-freshnote.md" ] && pass "purge keeps fresh archived note" || fail "purge keeps fresh archived note"
+
+rm -rf "$TNOTE_DIR/archive"
+
 # completions
 tnote completions bash | grep -q "complete" && pass "completions bash" || fail "completions bash"
 tnote completions zsh | grep -q "compdef" && pass "completions zsh" || fail "completions zsh"
@@ -191,6 +268,62 @@ tnote __complete-named-notes | grep -q "testproject" && pass "named note complet
 
 # version
 tnote --version | grep -q "tnote" && pass "--version" || fail "--version"
+
+echo ""
+
+# ── Upgrade ───────────────────────────────────────────────────────────────────
+
+echo "Upgrade:"
+
+# `tests/bin/curl` (still on PATH here, before it's reset to REAL_PATH below)
+# stubs the GitHub redirect so this never touches the network.
+CURRENT_VERSION=$(tnote --version | awk '{print $2}')
+
+FAKE_CURL_LATEST_TAG="v$CURRENT_VERSION" tnote upgrade 2>&1 | grep -q "already up to date" \
+  && pass "upgrade (already up to date)" || fail "upgrade (already up to date)"
+
+UPGRADE_OUT=$(FAKE_CURL_LATEST_TAG=v99.0.0 tnote upgrade 2>&1)
+echo "$UPGRADE_OUT" | grep -q "upgrading v$CURRENT_VERSION -> v99.0.0" && pass "upgrade (detects newer release)" || fail "upgrade (detects newer release)"
+echo "$UPGRADE_OUT" | grep -q "(stub) installer ran" && pass "upgrade (runs installer)" || fail "upgrade (runs installer)"
+echo "$UPGRADE_OUT" | grep -q "upgraded to v99.0.0" && pass "upgrade (reports success)" || fail "upgrade (reports success)"
+
+# Homebrew/cargo detection now checks that the *running binary itself*
+# lives under the reported install dir (not just "brew/cargo knows about
+# tnote somewhere") - so these tests copy the real binary into a fake
+# install dir and invoke it from there, rather than just stubbing the
+# brew/cargo output in isolation.
+TNOTE_BIN=$(command -v tnote)
+
+# Homebrew-managed install: should call `brew upgrade`, not the curl installer
+mkdir -p /fake/brew/opt/tnote/bin
+cp "$TNOTE_BIN" /fake/brew/opt/tnote/bin/tnote
+BREW_UPGRADE_OUT=$(FAKE_BREW_PREFIX=/fake/brew/opt/tnote FAKE_CURL_LATEST_TAG=v99.0.0 /fake/brew/opt/tnote/bin/tnote upgrade 2>&1)
+echo "$BREW_UPGRADE_OUT" | grep -q "via Homebrew" && pass "upgrade (detects Homebrew install)" || fail "upgrade (detects Homebrew install)"
+echo "$BREW_UPGRADE_OUT" | grep -q "(stub) brew upgrade ran" && pass "upgrade (runs brew upgrade)" || fail "upgrade (runs brew upgrade)"
+! echo "$BREW_UPGRADE_OUT" | grep -q "(stub) installer ran" && pass "upgrade (skips curl installer for brew installs)" || fail "upgrade (skips curl installer for brew installs)"
+
+# A brew prefix reported for tnote that the running binary does NOT actually
+# live under should NOT be treated as a Homebrew install (this is the "brew
+# knows about a tnote somewhere, but not this one" bug other self-updaters
+# have hit) - falls through to the curl installer instead.
+mkdir -p /fake/brew-other/opt/tnote/bin
+cp "$TNOTE_BIN" /fake/brew-other/opt/tnote/bin/tnote
+UNRELATED_BREW_OUT=$(FAKE_BREW_PREFIX=/fake/brew/opt/tnote FAKE_CURL_LATEST_TAG=v99.0.0 /fake/brew-other/opt/tnote/bin/tnote upgrade 2>&1)
+echo "$UNRELATED_BREW_OUT" | grep -q "(stub) installer ran" && pass "upgrade (ignores unrelated brew prefix)" || fail "upgrade (ignores unrelated brew prefix)"
+
+# cargo-install builds: neither packaged installer can safely take over, so
+# `tnote upgrade` should refuse rather than silently no-op.
+mkdir -p /fake/cargo-home/bin
+cp "$TNOTE_BIN" /fake/cargo-home/bin/tnote
+CARGO_UPGRADE_OUT=$(CARGO_HOME=/fake/cargo-home FAKE_CARGO_INSTALLED=1 FAKE_CURL_LATEST_TAG=v99.0.0 /fake/cargo-home/bin/tnote upgrade 2>&1) && CARGO_UPGRADE_STATUS=0 || CARGO_UPGRADE_STATUS=$?
+echo "$CARGO_UPGRADE_OUT" | grep -q "not a packaged release" && pass "upgrade (detects cargo install)" || fail "upgrade (detects cargo install)"
+[ "$CARGO_UPGRADE_STATUS" -ne 0 ] && pass "upgrade (cargo install exits nonzero)" || fail "upgrade (cargo install exits nonzero)"
+! echo "$CARGO_UPGRADE_OUT" | grep -qE "\(stub\) (installer|brew upgrade) ran" && pass "upgrade (skips packaged installers for cargo installs)" || fail "upgrade (skips packaged installers for cargo installs)"
+
+# Likewise: cargo claiming to know about tnote doesn't matter if the running
+# binary isn't actually sitting in cargo's bin dir.
+UNRELATED_CARGO_OUT=$(FAKE_CARGO_INSTALLED=1 FAKE_CURL_LATEST_TAG=v99.0.0 tnote upgrade 2>&1)
+echo "$UNRELATED_CARGO_OUT" | grep -q "(stub) installer ran" && pass "upgrade (ignores cargo when binary isn't in cargo's bin dir)" || fail "upgrade (ignores cargo when binary isn't in cargo's bin dir)"
 
 echo ""
 
