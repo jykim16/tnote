@@ -34,11 +34,18 @@ tnote path | grep -q ".md" && pass "path" || fail "path"
 # show (empty)
 tnote show | grep -q "empty" && pass "show (empty)" || fail "show (empty)"
 
+# show --json (empty)
+tnote show --json | jq -e '.[0].empty == true' >/dev/null && pass "show --json (empty)" || fail "show --json (empty)"
+
 # show (with content)
 NOTE=$(tnote path)
 mkdir -p "$(dirname "$NOTE")"
 echo "hello world" > "$NOTE"
 tnote show | grep -q "hello world" && pass "show (content)" || fail "show (content)"
+
+# show --json (content)
+tnote show --json | jq -e '.[0].content == "hello world\n" and .[0].empty == false' >/dev/null && pass "show --json (content)" || fail "show --json (content)"
+tnote show --json | jq -e '.[0].path | endswith(".md")' >/dev/null && pass "show --json (path field)" || fail "show --json (path field)"
 
 # show (bat renderer)
 # Note: no 2>&1 here - adding it forces bash to fork an extra subshell for
@@ -50,6 +57,11 @@ echo "$SHOW_BAT" | grep -q "hello world" && pass "show (bat renderer)" || fail "
 # list
 tnote list | grep -q "shell" && pass "list" || fail "list"
 
+# list --json
+tnote list --json | jq -e 'type == "array"' >/dev/null && pass "list --json (valid array)" || fail "list --json (valid array)"
+tnote list --json | jq -e 'any(.[]; .category == "shell")' >/dev/null && pass "list --json (has shell category)" || fail "list --json (has shell category)"
+tnote list --json | jq -e 'any(.[]; .current == true)' >/dev/null && pass "list --json (marks current note)" || fail "list --json (marks current note)"
+
 # name
 tnote name testproject
 tnote path | grep -q "named-testproject.md" && pass "name" || fail "name"
@@ -59,6 +71,21 @@ tnote name boundproject --bind '$9+@17'
 [ -f "$TNOTE_DIR/meta/tmux-\$9+@17.link" ] && pass "name --bind writes tmux link" || fail "name --bind writes tmux link"
 grep -q "boundproject" "$TNOTE_DIR/meta/tmux-\$9+@17.link" && pass "name --bind stores note name" || fail "name --bind stores note name"
 tnote show -n boundproject >/dev/null && pass "name --bind creates named note" || fail "name --bind creates named note"
+
+# show --json (named note)
+tnote show -n boundproject --json | jq -e '.[0].name == "boundproject"' >/dev/null && pass "show --json (named note)" || fail "show --json (named note)"
+
+# show --json (named note, glob match)
+echo "glob one" > "$TNOTE_DIR/named-globtest1.md"
+echo "glob two" > "$TNOTE_DIR/named-globtest2.md"
+GLOB_JSON=$(tnote show -n 'globtest*' --json)
+echo "$GLOB_JSON" | jq -e 'length == 2' >/dev/null && pass "show --json (glob match count)" || fail "show --json (glob match count)"
+echo "$GLOB_JSON" | jq -e '.[0].name == "globtest1" and .[1].name == "globtest2"' >/dev/null && pass "show --json (glob match sorted)" || fail "show --json (glob match sorted)"
+echo "$GLOB_JSON" | jq -e '.[0].content == "glob one\n" and .[1].content == "glob two\n"' >/dev/null && pass "show --json (glob match content)" || fail "show --json (glob match content)"
+rm -f "$TNOTE_DIR/named-globtest1.md" "$TNOTE_DIR/named-globtest2.md"
+
+# show --json (named note, not found)
+! tnote show -n ghost --json 2>/dev/null && pass "show --json (named note not found exits nonzero)" || fail "show --json (named note not found exits nonzero)"
 
 # name --bind (boolean current shell binding)
 CURRENT_KEY="shell-$$"
@@ -203,10 +230,16 @@ grep -q "archive me" "$TNOTE_DIR/named-archivetest.md" && pass "unarchive preser
 rm -rf "$TNOTE_DIR/archive"
 tnote list --archive | grep -q "no archived notes" && pass "list --archive (empty)" || fail "list --archive (empty)"
 
+# list --archive --json (empty)
+tnote list --archive --json | jq -e '. == []' >/dev/null && pass "list --archive --json (empty)" || fail "list --archive --json (empty)"
+
 # list --archive (with content)
 mkdir -p "$TNOTE_DIR/archive"
 echo "old stuff" > "$TNOTE_DIR/archive/named-oldproject.md"
 tnote list --archive | grep -q "oldproject" && pass "list --archive (content)" || fail "list --archive (content)"
+
+# list --archive --json (with content)
+tnote list --archive --json | jq -e 'any(.[]; .name == "oldproject" and .lines == 1)' >/dev/null && pass "list --archive --json (content)" || fail "list --archive --json (content)"
 rm -rf "$TNOTE_DIR/archive"
 
 # clean archive retention purge (opt-in via config; off by default)

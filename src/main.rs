@@ -4,11 +4,57 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use config::Config;
 use notes::Notes;
 use owo_colors::{OwoColorize, Stream::Stderr, Stream::Stdout, Style};
+use serde::Serialize;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 const CURRENT_TARGET_SENTINEL: &str = "__current__";
+
+// ── JSON output types ────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct NoteSourceJson {
+    kind: String,
+    key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ListEntryJson {
+    category: String,
+    name: String,
+    path: String,
+    lines: usize,
+    current: bool,
+    sources: Vec<NoteSourceJson>,
+}
+
+#[derive(Serialize)]
+struct ArchiveEntryJson {
+    name: String,
+    path: String,
+    lines: usize,
+}
+
+#[derive(Serialize)]
+struct ShowEntryJson {
+    name: String,
+    path: String,
+    content: String,
+    empty: bool,
+}
+
+fn print_json<T: Serialize>(value: &T) {
+    match serde_json::to_string_pretty(value) {
+        Ok(s) => println!("{}", s),
+        Err(e) => {
+            eprintln!("tnote: failed to serialize JSON: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
 
 #[derive(ValueEnum, Clone)]
 enum ClearScope {
@@ -77,6 +123,9 @@ enum Cmd {
         /// Show a specific named note, or all notes matching a glob pattern, e.g. -n 'proj-*' (quote the glob)
         #[arg(short = 'n', long)]
         name: Option<String>,
+        /// Output structured JSON instead of formatted text
+        #[arg(long)]
+        json: bool,
     },
     /// Remove notes not tied to a running process or window
     Clean {
@@ -105,6 +154,9 @@ enum Cmd {
         /// Only list notes matching a name, or a glob pattern, e.g. -n 'proj-*' (quote the glob)
         #[arg(short = 'n', long)]
         name: Option<String>,
+        /// Output structured JSON instead of formatted text
+        #[arg(long)]
+        json: bool,
     },
     /// Print the note file path
     Path {
@@ -186,7 +238,7 @@ fn main() {
             unbind.as_deref(),
             template.as_deref(),
         ),
-        Some(Cmd::Show { name }) => cmd_show(&config, &notes, name.as_deref()),
+        Some(Cmd::Show { name, json }) => cmd_show(&config, &notes, name.as_deref(), *json),
         Some(Cmd::Clean {
             all,
             name,
@@ -202,11 +254,11 @@ fn main() {
             *unarchive,
             *dryrun,
         ),
-        Some(Cmd::List { archive, name }) => {
+        Some(Cmd::List { archive, name, json }) => {
             if *archive {
-                cmd_list_archive(&notes, name.as_deref());
+                cmd_list_archive(&notes, *json, name.as_deref());
             } else {
-                cmd_list(&notes, &config, name.as_deref());
+                cmd_list(&notes, &config, *json, name.as_deref());
             }
         }
         Some(Cmd::Path { name }) => cmd_path(&notes, name.as_deref()),
@@ -707,7 +759,7 @@ fn matching_archived_notes(notes: &Notes, pattern: &str) -> Vec<String> {
         .collect()
 }
 
-fn cmd_show(config: &Config, notes: &Notes, name: Option<&str>) {
+fn cmd_show(config: &Config, notes: &Notes, name: Option<&str>, json: bool) {
     if let Some(n) = name {
         if n.contains('*') {
             let matches = matching_named_notes(notes, n);
@@ -715,12 +767,24 @@ fn cmd_show(config: &Config, notes: &Notes, name: Option<&str>) {
                 eprintln!("tnote show: no notes matching '{}'", n);
                 std::process::exit(1);
             }
-            for note_name in &matches {
-                show_named_note(config, notes, note_name);
+            if json {
+                let entries: Vec<ShowEntryJson> = matches
+                    .iter()
+                    .map(|note_name| show_named_note_json(notes, note_name))
+                    .collect();
+                print_json(&entries);
+            } else {
+                for note_name in &matches {
+                    show_named_note(config, notes, note_name);
+                }
             }
             return;
         }
-        show_named_note(config, notes, n);
+        if json {
+            print_json(&[show_named_note_json(notes, n)]);
+        } else {
+            show_named_note(config, notes, n);
+        }
         return;
     }
 
@@ -746,19 +810,54 @@ fn cmd_show(config: &Config, notes: &Notes, name: Option<&str>) {
     for (_, label, file) in &resolved {
         let non_empty = file.exists() && file.metadata().map(|m| m.len() > 0).unwrap_or(false);
         if non_empty {
-            print_show_content(config, label, file);
+            if json {
+                let content = fs::read_to_string(file).unwrap_or_default();
+                print_json(&[ShowEntryJson {
+                    name: label.clone(),
+                    path: file.display().to_string(),
+                    content,
+                    empty: false,
+                }]);
+            } else {
+                print_show_content(config, label, file);
+            }
             return;
         }
     }
 
-    let label = resolved
+    let (label, path) = resolved
         .first()
-        .map(|(_, l, _)| l.as_str())
-        .unwrap_or("unknown");
-    println!(
-        "tnote show: (empty) [{}]",
-        label.if_supports_color(Stdout, |t| t.dimmed())
-    );
+        .map(|(_, l, p)| (l.as_str(), p.display().to_string()))
+        .unwrap_or(("unknown", String::new()));
+    if json {
+        print_json(&[ShowEntryJson {
+            name: label.to_string(),
+            path,
+            content: String::new(),
+            empty: true,
+        }]);
+    } else {
+        println!(
+            "tnote show: (empty) [{}]",
+            label.if_supports_color(Stdout, |t| t.dimmed())
+        );
+    }
+}
+
+fn show_named_note_json(notes: &Notes, n: &str) -> ShowEntryJson {
+    let file = notes.dir.join(format!("named-{}.md", n));
+    if !file.exists() {
+        eprintln!("tnote show: named note '{}' not found", n);
+        std::process::exit(1);
+    }
+    let content = fs::read_to_string(&file).unwrap_or_default();
+    let empty = content.is_empty();
+    ShowEntryJson {
+        name: n.to_string(),
+        path: file.display().to_string(),
+        content,
+        empty,
+    }
 }
 
 fn clean_one_named(notes: &Notes, name: &str, archive: bool, unarchive: bool, dry_run: bool) {
@@ -917,7 +1016,7 @@ fn name_matches(filter: &str, candidate: &str) -> bool {
     }
 }
 
-fn cmd_list(notes: &Notes, config: &Config, name: Option<&str>) {
+fn cmd_list(notes: &Notes, config: &Config, json: bool, name: Option<&str>) {
     let (_, current_file) = current_note(notes);
     match notes.list_notes() {
         Ok(list) => {
@@ -935,10 +1034,55 @@ fn cmd_list(notes: &Notes, config: &Config, name: Option<&str>) {
                         std::process::exit(1);
                     }
                     None => {
-                        println!("tnote list: (no notes yet)");
+                        if json {
+                            print_json(&Vec::<ListEntryJson>::new());
+                        } else {
+                            println!("tnote list: (no notes yet)");
+                        }
                         return;
                     }
                 }
+            }
+
+            if json {
+                let entries: Vec<ListEntryJson> = list
+                    .iter()
+                    .map(|(cat, display, note_sources, lines, path)| {
+                        let name = if cat == "shell" {
+                            display.trim_start_matches("shell-").to_string()
+                        } else {
+                            display.clone()
+                        };
+                        let sources: Vec<NoteSourceJson> = note_sources
+                            .iter()
+                            .map(|k| {
+                                if k.starts_with("tmux-") {
+                                    NoteSourceJson {
+                                        kind: "tmux".to_string(),
+                                        key: k.clone(),
+                                        label: tmux::window_display_label(k),
+                                    }
+                                } else {
+                                    NoteSourceJson {
+                                        kind: "shell".to_string(),
+                                        key: k.clone(),
+                                        label: None,
+                                    }
+                                }
+                            })
+                            .collect();
+                        ListEntryJson {
+                            category: cat.clone(),
+                            name,
+                            path: path.display().to_string(),
+                            lines: *lines,
+                            current: *path == current_file,
+                            sources,
+                        }
+                    })
+                    .collect();
+                print_json(&entries);
+                return;
             }
 
             struct Row {
@@ -1051,16 +1195,20 @@ fn cmd_list(notes: &Notes, config: &Config, name: Option<&str>) {
     }
 }
 
-fn cmd_list_archive(notes: &Notes, name: Option<&str>) {
+fn cmd_list_archive(notes: &Notes, json: bool, name: Option<&str>) {
     let archive = notes.archive_dir();
     let entries = match std::fs::read_dir(&archive) {
         Ok(e) => e,
         Err(_) => {
-            println!("tnote list: (no archived notes)");
+            if json {
+                print_json(&Vec::<ArchiveEntryJson>::new());
+            } else {
+                println!("tnote list: (no archived notes)");
+            }
             return;
         }
     };
-    let mut items: Vec<(String, usize)> = entries
+    let mut items: Vec<(String, usize, PathBuf)> = entries
         .flatten()
         .filter_map(|e| {
             let note_name = e.file_name().to_string_lossy().to_string();
@@ -1073,11 +1221,12 @@ fn cmd_list_archive(notes: &Notes, name: Option<&str>) {
                     return None;
                 }
             }
-            let lines = std::fs::read_to_string(e.path())
+            let path = e.path();
+            let lines = std::fs::read_to_string(&path)
                 .unwrap_or_default()
                 .lines()
                 .count();
-            Some((note_name, lines))
+            Some((note_name, lines, path))
         })
         .collect();
     if items.is_empty() {
@@ -1087,18 +1236,36 @@ fn cmd_list_archive(notes: &Notes, name: Option<&str>) {
                 std::process::exit(1);
             }
             None => {
-                println!("tnote list: (no archived notes)");
+                if json {
+                    print_json(&Vec::<ArchiveEntryJson>::new());
+                } else {
+                    println!("tnote list: (no archived notes)");
+                }
                 return;
             }
         }
     }
     items.sort();
-    let max_w = items.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+
+    if json {
+        let entries: Vec<ArchiveEntryJson> = items
+            .iter()
+            .map(|(name, lines, path)| ArchiveEntryJson {
+                name: name.clone(),
+                path: path.display().to_string(),
+                lines: *lines,
+            })
+            .collect();
+        print_json(&entries);
+        return;
+    }
+
+    let max_w = items.iter().map(|(n, _, _)| n.len()).max().unwrap_or(0);
     println!(
         "{}",
         "archived:".if_supports_color(Stdout, |t| t.style(owo_colors::Style::new().cyan().bold()))
     );
-    for (name, lines) in &items {
+    for (name, lines, _) in &items {
         println!(
             "  {}{}  {} lines",
             name,

@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y \
     tmux \
     curl \
     build-essential \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust
