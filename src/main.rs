@@ -47,6 +47,14 @@ struct Cli {
     /// Open a specific named note
     #[arg(short = 'n', long)]
     name: Option<String>,
+
+    /// Populate the note with a saved template (see 'tnote name --template') if it has no content yet
+    #[arg(short = 't', long, value_name = "NAME")]
+    template: Option<String>,
+
+    /// With --template, overwrite existing note content instead of erroring
+    #[arg(short = 'f', long, requires = "template")]
+    force: bool,
 }
 
 #[derive(Subcommand)]
@@ -60,6 +68,9 @@ enum Cmd {
         /// Unbind all links for this named note, or a specific tmux window key / shell pid if provided
         #[arg(long, value_name = "TARGET", num_args = 0..=1, default_missing_value = CURRENT_TARGET_SENTINEL, conflicts_with = "bind")]
         unbind: Option<String>,
+        /// Save this window's current note content as a reusable template (~/.tnote/template-<NAME>.md)
+        #[arg(long, value_name = "NAME", conflicts_with_all = ["name", "bind", "unbind"])]
+        template: Option<String>,
     },
     /// Print note contents inline
     Show {
@@ -155,13 +166,25 @@ fn main() {
     }
 
     match &cli.command {
-        None => cmd_open(&config, &notes, cli.name.as_deref()),
-        Some(Cmd::Name { name, bind, unbind }) => cmd_name(
+        None => cmd_open(
+            &config,
+            &notes,
+            cli.name.as_deref(),
+            cli.template.as_deref(),
+            cli.force,
+        ),
+        Some(Cmd::Name {
+            name,
+            bind,
+            unbind,
+            template,
+        }) => cmd_name(
             &config,
             &notes,
             name.as_deref(),
             bind.as_deref(),
             unbind.as_deref(),
+            template.as_deref(),
         ),
         Some(Cmd::Show { name }) => cmd_show(&config, &notes, name.as_deref()),
         Some(Cmd::Clean {
@@ -238,9 +261,48 @@ fn named_or_current(notes: &Notes, name: Option<&str>) -> (String, PathBuf) {
     }
 }
 
+/// Path for a saved template: `~/.tnote/template-<name>.md`.
+fn template_path(notes: &Notes, template_name: &str) -> PathBuf {
+    notes.dir.join(format!("template-{}.md", template_name))
+}
+
+/// Copy a saved template's content onto `target`. Refuses to overwrite a target that
+/// already has content unless `force` is set.
+fn apply_template(
+    notes: &Notes,
+    target: &Path,
+    template_name: &str,
+    force: bool,
+) -> Result<(), String> {
+    let template_file = template_path(notes, template_name);
+    let content = fs::read_to_string(&template_file).map_err(|_| {
+        format!(
+            "template '{}' not found (expected {})",
+            template_name,
+            template_file.display()
+        )
+    })?;
+
+    let existing_len = fs::metadata(target).map(|m| m.len()).unwrap_or(0);
+    if existing_len > 0 && !force {
+        return Err(format!(
+            "file exists and has content — refusing to overwrite with template '{}' (use --force/-f to override)",
+            template_name
+        ));
+    }
+
+    fs::write(target, content).map_err(|e| e.to_string())
+}
+
 // ── Subcommands ───────────────────────────────────────────────────────────────
 
-fn cmd_open(config: &Config, notes: &Notes, name: Option<&str>) {
+fn cmd_open(
+    config: &Config,
+    notes: &Notes,
+    name: Option<&str>,
+    template: Option<&str>,
+    force: bool,
+) {
     // First-run hint
     if !config.dir.join("meta").join("config").exists() {
         eprintln!("tnote: tip — run 'tnote setup' to configure keybindings and editor");
@@ -259,7 +321,12 @@ fn cmd_open(config: &Config, notes: &Notes, name: Option<&str>) {
         None => notes.label_for_key(&key),
     };
 
-    if !file.exists() {
+    if let Some(template_name) = template {
+        if let Err(e) = apply_template(notes, &file, template_name, force) {
+            eprintln!("tnote: {}", e);
+            std::process::exit(1);
+        }
+    } else if !file.exists() {
         let _ = fs::write(&file, "");
     }
 
@@ -361,7 +428,24 @@ fn cmd_name(
     name: Option<&str>,
     bind: Option<&str>,
     unbind: Option<&str>,
+    template: Option<&str>,
 ) {
+    if let Some(template_name) = template {
+        let (_, file) = current_note(notes);
+        let content = fs::read_to_string(&file).unwrap_or_default();
+        match fs::write(template_path(notes, template_name), content) {
+            Ok(()) => println!("tnote name: saved template '{}'", template_name),
+            Err(e) => {
+                eprintln!(
+                    "tnote name: failed to save template '{}': {}",
+                    template_name, e
+                );
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     let Some(name) = name else {
         if tmux::is_in_tmux() {
             let window_key = current_note(notes).0;
@@ -1341,6 +1425,9 @@ USAGE:
   tnote name [name]                Name or rebind this window's note (also renames the tmux window)
   tnote name <name> --bind [key]   Bind the current session, or one specific tmux/shell binding, to a named note
   tnote name <name> --unbind [key] Remove all bindings for a named note, or one specific binding
+  tnote name --template NAME       Save this window's current note as a template (~/.tnote/template-NAME.md)
+  tnote --template NAME / -t NAME  Populate this window's note from a saved template (errors if it has content)
+  tnote --force --template NAME    Overwrite existing content when applying a template (short: -f, -ft NAME)
   tnote show                       Print note contents inline
   tnote clean [--dryrun]           Remove orphaned notes and popup sessions
   tnote list / ls                  List all notes with line counts
