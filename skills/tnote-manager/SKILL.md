@@ -223,7 +223,7 @@ Before step 6, ask the user whether this agent should start in autonomous/no-pro
 
 Known per-harness automode flags — use these when the user says yes:
 - **Claude Code**: `claude --permission-mode auto`
-- **Codex CLI**: `codex --full-auto`
+- **Codex CLI**: `codex -a on-request`
 
 If `<agent-cli-command>` is a harness other than these two, ask the user for the correct flag rather than guessing one — automode flags vary by harness and by version, and guessing wrong can either silently no-op or bypass more than intended.
 
