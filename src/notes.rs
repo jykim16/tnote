@@ -231,6 +231,48 @@ impl Notes {
         Ok(true)
     }
 
+    /// Permanently remove archived notes whose file was last modified more than
+    /// `retention_days` ago. Returns the names of notes removed (or that would be
+    /// removed, under `dry_run`).
+    pub fn purge_archive(&self, retention_days: u32, dry_run: bool) -> io::Result<Vec<String>> {
+        let archive = self.archive_dir();
+        if !archive.exists() {
+            return Ok(Vec::new());
+        }
+
+        let cutoff = std::time::SystemTime::now()
+            - std::time::Duration::from_secs(retention_days as u64 * 24 * 60 * 60);
+
+        let mut purged = Vec::new();
+        for entry in fs::read_dir(&archive)? {
+            let entry = entry?;
+            let path = entry.path();
+            let name = match path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(|n| n.strip_prefix("named-"))
+                .and_then(|n| n.strip_suffix(".md"))
+            {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+
+            let modified = match entry.metadata().and_then(|m| m.modified()) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+
+            if modified < cutoff {
+                if !dry_run {
+                    let _ = fs::remove_file(&path);
+                }
+                purged.push(name);
+            }
+        }
+
+        Ok(purged)
+    }
+
     /// Restore a named note from the archive directory.
     /// Returns Ok(true) if the archived note existed, Ok(false) if not found.
     pub fn unarchive_named(&self, name: &str, dry_run: bool) -> io::Result<bool> {
@@ -417,6 +459,23 @@ impl Notes {
         names.sort();
         Ok(names)
     }
+
+    /// List all archived named note names in sorted order.
+    pub fn archived_note_names(&self) -> std::io::Result<Vec<String>> {
+        let mut names: Vec<String> = match fs::read_dir(self.archive_dir()) {
+            Ok(entries) => entries
+                .filter_map(|entry| {
+                    let path = entry.ok()?.path();
+                    let stem = path.file_stem()?.to_str()?;
+                    stem.strip_prefix("named-").map(|name| name.to_string())
+                })
+                .collect(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(e),
+        };
+        names.sort();
+        Ok(names)
+    }
 }
 
 pub fn is_pid_alive(pid: u32) -> bool {
@@ -568,6 +627,66 @@ mod tests {
         fs::write(tmp.path().join("tmux-$1+@3.md"), "").unwrap();
         let migrated = notes.name_window("tmux-$1+@3", "work").unwrap();
         assert!(!migrated);
+    }
+
+    // ── purge_archive ─────────────────────────────────────────────────────────
+
+    fn set_mtime_days_ago(path: &std::path::Path, days: u64) {
+        let file = fs::File::options().write(true).open(path).unwrap();
+        let time = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 86400);
+        file.set_modified(time).unwrap();
+    }
+
+    #[test]
+    fn purge_archive_no_archive_dir_returns_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        assert_eq!(
+            notes.purge_archive(30, false).unwrap(),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn purge_archive_removes_notes_older_than_retention() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::create_dir_all(notes.archive_dir()).unwrap();
+        let old = notes.archive_dir().join("named-old.md");
+        fs::write(&old, "content").unwrap();
+        set_mtime_days_ago(&old, 40);
+
+        let purged = notes.purge_archive(30, false).unwrap();
+        assert_eq!(purged, vec!["old".to_string()]);
+        assert!(!old.exists());
+    }
+
+    #[test]
+    fn purge_archive_keeps_notes_within_retention() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::create_dir_all(notes.archive_dir()).unwrap();
+        let recent = notes.archive_dir().join("named-recent.md");
+        fs::write(&recent, "content").unwrap();
+        set_mtime_days_ago(&recent, 5);
+
+        let purged = notes.purge_archive(30, false).unwrap();
+        assert!(purged.is_empty());
+        assert!(recent.exists());
+    }
+
+    #[test]
+    fn purge_archive_dry_run_leaves_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::create_dir_all(notes.archive_dir()).unwrap();
+        let old = notes.archive_dir().join("named-old.md");
+        fs::write(&old, "content").unwrap();
+        set_mtime_days_ago(&old, 40);
+
+        let purged = notes.purge_archive(30, true).unwrap();
+        assert_eq!(purged, vec!["old".to_string()]);
+        assert!(old.exists());
     }
 
     // ── remove_named ──────────────────────────────────────────────────────────
@@ -799,5 +918,26 @@ mod tests {
             .find(|(c, d, _, _, _)| c == "named" && d == "work")
             .unwrap();
         assert_eq!(work.2, vec!["tmux-$1+@3"]);
+    }
+
+    // ── archived_note_names ──────────────────────────────────────────────────
+
+    #[test]
+    fn archived_note_names_no_archive_dir_returns_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        let names = notes.archived_note_names().unwrap();
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn archived_note_names_lists_sorted_stems() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = setup(&tmp);
+        fs::create_dir_all(notes.archive_dir()).unwrap();
+        fs::write(notes.archive_dir().join("named-zeta.md"), "z").unwrap();
+        fs::write(notes.archive_dir().join("named-alpha.md"), "a").unwrap();
+        let names = notes.archived_note_names().unwrap();
+        assert_eq!(names, vec!["alpha".to_string(), "zeta".to_string()]);
     }
 }

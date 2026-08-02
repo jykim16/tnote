@@ -9,6 +9,7 @@ pub struct Config {
     pub editor: String,
     pub renderer: Option<String>,
     pub ls_annotation: Option<String>,
+    pub archive_retention_days: Option<u32>,
 }
 
 impl Config {
@@ -70,6 +71,11 @@ impl Config {
             .or_else(|| file.get("show_renderer").cloned())
             .filter(|s| !s.is_empty());
 
+        let archive_retention_days = std::env::var("TNOTE_ARCHIVE_RETENTION_DAYS")
+            .ok()
+            .or_else(|| file.get("archive_retention_days").cloned())
+            .and_then(|s| s.parse::<u32>().ok());
+
         Config {
             width: parse_str("TNOTE_WIDTH", file.get("width").map(String::as_str), "100%"),
             height: parse_str(
@@ -81,6 +87,7 @@ impl Config {
             editor: parse_str("EDITOR", file.get("editor").map(String::as_str), "vim"),
             renderer,
             ls_annotation,
+            archive_retention_days,
             dir,
         }
     }
@@ -96,6 +103,9 @@ impl Config {
         }
         if let Some(ref cmd) = self.ls_annotation {
             content.push_str(&format!("ls_annotation={}\n", cmd));
+        }
+        if let Some(days) = self.archive_retention_days {
+            content.push_str(&format!("archive_retention_days={}\n", days));
         }
         std::fs::write(self.dir.join("meta").join("config"), content)
     }
@@ -190,6 +200,7 @@ mod tests {
             height: "30".to_string(),
             renderer: None,
             ls_annotation: None,
+            archive_retention_days: None,
         };
         cfg.save().unwrap();
         let content = std::fs::read_to_string(tmp.path().join("meta/config")).unwrap();
@@ -210,6 +221,7 @@ mod tests {
             height: "25".to_string(),
             renderer: None,
             ls_annotation: None,
+            archive_retention_days: None,
         };
         cfg.save().unwrap();
         let map = read_config_file(&tmp.path().join("meta/config"));
@@ -217,5 +229,44 @@ mod tests {
         assert_eq!(map.get("key").map(String::as_str), Some("g"));
         assert_eq!(map.get("width").map(String::as_str), Some("70"));
         assert_eq!(map.get("height").map(String::as_str), Some("25"));
+    }
+
+    #[test]
+    fn config_save_writes_archive_retention_days_when_set() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = Config {
+            dir: tmp.path().to_path_buf(),
+            editor: "vim".to_string(),
+            key: "t".to_string(),
+            width: "100%".to_string(),
+            height: "50%".to_string(),
+            renderer: None,
+            ls_annotation: None,
+            archive_retention_days: Some(30),
+        };
+        cfg.save().unwrap();
+        let map = read_config_file(&tmp.path().join("meta/config"));
+        assert_eq!(
+            map.get("archive_retention_days").map(String::as_str),
+            Some("30")
+        );
+    }
+
+    #[test]
+    fn config_save_omits_archive_retention_days_when_unset() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = Config {
+            dir: tmp.path().to_path_buf(),
+            editor: "vim".to_string(),
+            key: "t".to_string(),
+            width: "100%".to_string(),
+            height: "50%".to_string(),
+            renderer: None,
+            ls_annotation: None,
+            archive_retention_days: None,
+        };
+        cfg.save().unwrap();
+        let content = std::fs::read_to_string(tmp.path().join("meta/config")).unwrap();
+        assert!(!content.contains("archive_retention_days"));
     }
 }

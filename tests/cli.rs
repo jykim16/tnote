@@ -368,6 +368,265 @@ fn name_rejects_bind_and_unbind_together() {
     assert!(!output.status.success());
 }
 
+// ── tnote name --template (save) ────────────────────────────────────────────────
+
+#[test]
+fn name_template_saves_current_note_as_template() {
+    let dir = TempDir::new().unwrap();
+    let path_out = stdout(tnote(dir.path()).arg("path"));
+    let note_path = Path::new(path_out.trim()).to_path_buf();
+    fs::create_dir_all(note_path.parent().unwrap()).unwrap();
+    fs::write(&note_path, "## Status: in-progress\n").unwrap();
+
+    assert!(exit_ok(tnote(dir.path()).args([
+        "name",
+        "--template",
+        "agent"
+    ])));
+    let template = dir.path().join("template-agent.md");
+    assert!(template.exists());
+    assert_eq!(
+        fs::read_to_string(&template).unwrap(),
+        "## Status: in-progress\n"
+    );
+}
+
+#[test]
+fn name_template_does_not_bind_or_rename() {
+    let dir = TempDir::new().unwrap();
+    assert!(exit_ok(tnote(dir.path()).args([
+        "name",
+        "--template",
+        "agent"
+    ])));
+    // No named note or link should be created — this only writes the template file.
+    assert!(!dir.path().join("named-agent.md").exists());
+    let meta = dir.path().join("meta");
+    let has_link = meta.exists()
+        && fs::read_dir(&meta)
+            .unwrap()
+            .any(|e| e.unwrap().file_name().to_string_lossy().ends_with(".link"));
+    assert!(!has_link);
+}
+
+#[test]
+fn name_template_conflicts_with_positional_name() {
+    let dir = TempDir::new().unwrap();
+    let output = tnote(dir.path())
+        .args(["name", "foo", "--template", "agent"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}
+
+#[test]
+fn name_template_conflicts_with_bind() {
+    let dir = TempDir::new().unwrap();
+    let output = tnote(dir.path())
+        .args(["name", "--template", "agent", "--bind"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}
+
+// ── tnote --template / -t (apply) ────────────────────────────────────────────────
+
+#[test]
+fn template_applies_to_fresh_note() {
+    // Outside tmux, applying a template still opens `editor::run`, which needs a real
+    // pty and can't run headless in CI — so exercise the apply-then-open flow through
+    // the fake-tmux popup path instead (same trick `show_in_tmux_falls_back_to_shell_note`
+    // uses), which resolves to the same shell-<pid> note file since the fake tmux
+    // binary returns no window id.
+    let dir = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    fs::write(
+        dir.path().join("template-agent.md"),
+        "## Status: in-progress\n",
+    )
+    .unwrap();
+
+    let status = tnote_in_tmux(dir.path(), home.path())
+        .args(["--template", "agent"])
+        .output()
+        .unwrap()
+        .status;
+    assert!(status.success());
+
+    let path_out = stdout(tnote(dir.path()).arg("path"));
+    let note_path = Path::new(path_out.trim()).to_path_buf();
+    assert_eq!(
+        fs::read_to_string(&note_path).unwrap(),
+        "## Status: in-progress\n"
+    );
+}
+
+#[test]
+fn template_short_flag_t_works() {
+    let dir = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    fs::write(dir.path().join("template-agent.md"), "content\n").unwrap();
+    let status = tnote_in_tmux(dir.path(), home.path())
+        .args(["-t", "agent"])
+        .output()
+        .unwrap()
+        .status;
+    assert!(status.success());
+    let path_out = stdout(tnote(dir.path()).arg("path"));
+    let note_path = Path::new(path_out.trim()).to_path_buf();
+    assert_eq!(fs::read_to_string(&note_path).unwrap(), "content\n");
+}
+
+#[test]
+fn template_errors_when_template_missing() {
+    let dir = TempDir::new().unwrap();
+    let output = tnote(dir.path())
+        .args(["--template", "ghost"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(err.contains("not found"));
+}
+
+#[test]
+fn template_errors_when_note_already_has_content() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("template-agent.md"), "template content\n").unwrap();
+
+    let path_out = stdout(tnote(dir.path()).arg("path"));
+    let note_path = Path::new(path_out.trim()).to_path_buf();
+    fs::create_dir_all(note_path.parent().unwrap()).unwrap();
+    fs::write(&note_path, "existing content\n").unwrap();
+
+    let output = tnote(dir.path())
+        .args(["--template", "agent"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        err.contains("file exists")
+            || err.contains("already has content")
+            || err.contains("refusing")
+    );
+    // Original content is preserved.
+    assert_eq!(
+        fs::read_to_string(&note_path).unwrap(),
+        "existing content\n"
+    );
+}
+
+#[test]
+fn template_force_overwrites_existing_content() {
+    let dir = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    fs::write(dir.path().join("template-agent.md"), "template content\n").unwrap();
+
+    let path_out = stdout(tnote(dir.path()).arg("path"));
+    let note_path = Path::new(path_out.trim()).to_path_buf();
+    fs::create_dir_all(note_path.parent().unwrap()).unwrap();
+    fs::write(&note_path, "existing content\n").unwrap();
+
+    let status = tnote_in_tmux(dir.path(), home.path())
+        .args(["--force", "--template", "agent"])
+        .output()
+        .unwrap()
+        .status;
+    assert!(status.success());
+    assert_eq!(
+        fs::read_to_string(&note_path).unwrap(),
+        "template content\n"
+    );
+}
+
+#[test]
+fn template_combined_short_flags_ft_work() {
+    let dir = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    fs::write(dir.path().join("template-agent.md"), "template content\n").unwrap();
+
+    let path_out = stdout(tnote(dir.path()).arg("path"));
+    let note_path = Path::new(path_out.trim()).to_path_buf();
+    fs::create_dir_all(note_path.parent().unwrap()).unwrap();
+    fs::write(&note_path, "existing content\n").unwrap();
+
+    let status = tnote_in_tmux(dir.path(), home.path())
+        .args(["-ft", "agent"])
+        .output()
+        .unwrap()
+        .status;
+    assert!(status.success());
+    assert_eq!(
+        fs::read_to_string(&note_path).unwrap(),
+        "template content\n"
+    );
+}
+
+#[test]
+fn template_errors_when_linked_named_note_has_content() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("template-agent.md"), "template content\n").unwrap();
+
+    let path_out = stdout(tnote(dir.path()).arg("path"));
+    let key = Path::new(path_out.trim())
+        .file_stem()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    fs::create_dir_all(dir.path().join("meta")).unwrap();
+    fs::write(
+        dir.path().join("meta").join(format!("{}.link", key)),
+        "linked",
+    )
+    .unwrap();
+    fs::write(dir.path().join("named-linked.md"), "linked content\n").unwrap();
+
+    let output = tnote(dir.path())
+        .args(["--template", "agent"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("named-linked.md")).unwrap(),
+        "linked content\n"
+    );
+}
+
+#[test]
+fn template_replaces_when_linked_named_note_is_empty() {
+    let dir = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    fs::write(dir.path().join("template-agent.md"), "template content\n").unwrap();
+
+    let path_out = stdout(tnote(dir.path()).arg("path"));
+    let key = Path::new(path_out.trim())
+        .file_stem()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    fs::create_dir_all(dir.path().join("meta")).unwrap();
+    fs::write(
+        dir.path().join("meta").join(format!("{}.link", key)),
+        "linked",
+    )
+    .unwrap();
+    fs::write(dir.path().join("named-linked.md"), "").unwrap();
+
+    let status = tnote_in_tmux(dir.path(), home.path())
+        .args(["--template", "agent"])
+        .output()
+        .unwrap()
+        .status;
+    assert!(status.success());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("named-linked.md")).unwrap(),
+        "template content\n"
+    );
+}
+
 // ── tnote clean ───────────────────────────────────────────────────────────────
 
 #[test]
@@ -918,6 +1177,135 @@ fn show_name_glob_mid_pattern() {
     assert!(stdout.contains("auth login"));
     assert!(stdout.contains("api login"));
     assert!(!stdout.contains("auth logout"));
+}
+
+#[test]
+fn path_name_glob_matches_multiple_notes() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-proj-alpha.md"), "a\n").unwrap();
+    fs::write(dir.path().join("named-proj-beta.md"), "b\n").unwrap();
+    fs::write(dir.path().join("named-other.md"), "c\n").unwrap();
+    let output = tnote(dir.path())
+        .args(["path", "--name", "proj-*"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("named-proj-alpha.md"));
+    assert!(stdout.contains("named-proj-beta.md"));
+    assert!(!stdout.contains("named-other.md"));
+}
+
+#[test]
+fn path_name_glob_no_matches_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    let status = tnote(dir.path())
+        .args(["path", "--name", "ghost-*"])
+        .output()
+        .unwrap()
+        .status;
+    assert!(!status.success());
+}
+
+#[test]
+fn clean_name_glob_removes_matching_notes() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-proj-alpha.md"), "a\n").unwrap();
+    fs::write(dir.path().join("named-proj-beta.md"), "b\n").unwrap();
+    fs::write(dir.path().join("named-other.md"), "c\n").unwrap();
+    let output = tnote(dir.path())
+        .args(["clean", "--name", "proj-*"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("removed named note 'proj-alpha'"));
+    assert!(stdout.contains("removed named note 'proj-beta'"));
+    assert!(!dir.path().join("named-proj-alpha.md").exists());
+    assert!(!dir.path().join("named-proj-beta.md").exists());
+    assert!(dir.path().join("named-other.md").exists());
+}
+
+#[test]
+fn clean_name_glob_no_matches_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    let status = tnote(dir.path())
+        .args(["clean", "--name", "ghost-*", "--dryrun"])
+        .output()
+        .unwrap()
+        .status;
+    assert!(!status.success());
+}
+
+#[test]
+fn clean_name_glob_unarchive_matches_against_archive_dir() {
+    let dir = TempDir::new().unwrap();
+    let archive = dir.path().join("archive");
+    fs::create_dir_all(&archive).unwrap();
+    fs::write(archive.join("named-proj-alpha.md"), "a\n").unwrap();
+    fs::write(archive.join("named-proj-beta.md"), "b\n").unwrap();
+    // An active note with a matching name must not be picked up as if archived.
+    fs::write(dir.path().join("named-proj-gamma.md"), "g\n").unwrap();
+
+    let output = tnote(dir.path())
+        .args(["clean", "--name", "proj-*", "--unarchive"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("unarchived named note 'proj-alpha'"));
+    assert!(stdout.contains("unarchived named note 'proj-beta'"));
+    assert!(!stdout.contains("proj-gamma"));
+    assert!(dir.path().join("named-proj-alpha.md").exists());
+    assert!(dir.path().join("named-proj-beta.md").exists());
+    assert!(!archive.join("named-proj-alpha.md").exists());
+    assert!(!archive.join("named-proj-beta.md").exists());
+}
+
+#[test]
+fn list_name_filters_to_exact_match() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-proj-alpha.md"), "a\n").unwrap();
+    fs::write(dir.path().join("named-other.md"), "b\n").unwrap();
+    let out = stdout(&mut tnote(dir.path()).args(["list", "--name", "proj-alpha"]));
+    assert!(out.contains("proj-alpha"));
+    assert!(!out.contains("other"));
+}
+
+#[test]
+fn list_name_glob_filters_matching_notes() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-proj-alpha.md"), "a\n").unwrap();
+    fs::write(dir.path().join("named-proj-beta.md"), "b\n").unwrap();
+    fs::write(dir.path().join("named-other.md"), "c\n").unwrap();
+    let out = stdout(&mut tnote(dir.path()).args(["list", "--name", "proj-*"]));
+    assert!(out.contains("proj-alpha"));
+    assert!(out.contains("proj-beta"));
+    assert!(!out.contains("other"));
+}
+
+#[test]
+fn list_name_no_matches_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("named-proj-alpha.md"), "a\n").unwrap();
+    let status = tnote(dir.path())
+        .args(["list", "--name", "ghost-*"])
+        .output()
+        .unwrap()
+        .status;
+    assert!(!status.success());
+}
+
+#[test]
+fn list_archive_name_filters_matching_notes() {
+    let dir = TempDir::new().unwrap();
+    let archive = dir.path().join("archive");
+    fs::create_dir_all(&archive).unwrap();
+    fs::write(archive.join("named-proj-alpha.md"), "a\n").unwrap();
+    fs::write(archive.join("named-other.md"), "b\n").unwrap();
+    let out = stdout(&mut tnote(dir.path()).args(["list", "--archive", "--name", "proj-*"]));
+    assert!(out.contains("proj-alpha"));
+    assert!(!out.contains("other"));
 }
 
 #[test]
