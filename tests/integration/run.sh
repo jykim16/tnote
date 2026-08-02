@@ -117,6 +117,11 @@ tnote name currentbound --unbind
 # name --unbind (wrong note)
 ! tnote name wrongnote --unbind 4242 2>/dev/null && pass "name --unbind wrong note exits nonzero" || fail "name --unbind wrong note exits nonzero"
 
+# goto (no name, outside tmux) exits nonzero with guidance rather than erroring obscurely
+GOTO_NO_NAME=$(tnote goto 2>&1; echo "exit=$?")
+echo "$GOTO_NO_NAME" | grep -q "provide a name" && pass "goto no name outside tmux errors" || fail "goto no name outside tmux errors"
+echo "$GOTO_NO_NAME" | grep -q "exit=1" && pass "goto no name outside tmux exits nonzero" || fail "goto no name outside tmux exits nonzero"
+
 # name --template / tnote --template (file-based note templates, ~/.tnote/template-NAME.md)
 # Run in isolated scratch TNOTE_DIRs so the shared state built up above
 # (testproject, boundproject, etc.) isn't disturbed; restore TNOTE_DIR after.
@@ -505,6 +510,24 @@ sleep 1
 [ -f "$TNOTE_DIR/meta/${PICKER_TARGET}.link" ] && pass "name picker filter writes tmux link" || fail "name picker filter writes tmux link"
 grep -q "beta project" "$TNOTE_DIR/meta/${PICKER_TARGET}.link" && pass "name picker filter selects filtered note" || fail "name picker filter selects filtered note"
 tmux kill-window -t test-session:picker 2>/dev/null || true
+
+# tnote __goto-picker filter flow — unlike __name-picker, there's no "New name..."
+# row (allow_new: false), so the first filtered match is selectable without a
+# leading Down keypress. Selecting it should perform the actual jump, so we check
+# test-session's current window the same way as the "goto selects the bound
+# window" test above.
+tmux new-window -d -t test-session: -n goto-pick "sh"
+GOTO_PICK_KEY=$(tmux display-message -p -t test-session:goto-pick '#{session_id}+#{window_id}')
+tnote name gotopicktest --bind "$GOTO_PICK_KEY" >/dev/null
+tmux select-window -t test-session:0
+tmux new-window -d -t test-session: -n goto-picker "TNOTE_DIR='$TNOTE_DIR' tnote __goto-picker"
+sleep 1
+tmux send-keys -t test-session:goto-picker 'gotopick' Enter
+sleep 1
+GOTO_PICKER_CURRENT=$(tmux display-message -p -t test-session '#{window_name}')
+[ "$GOTO_PICKER_CURRENT" = "goto-pick" ] && pass "goto picker filter selects and jumps" || fail "goto picker filter selects and jumps"
+tmux kill-window -t test-session:goto-pick 2>/dev/null || true
+tmux kill-window -t test-session:goto-picker 2>/dev/null || true
 
 # tnote open (popup) — in headless docker, display-popup fails (no client), so we just verify it doesn't crash
 TMUX_OPEN=$(tmux run-shell 'TNOTE_DIR='"$TNOTE_DIR"' EDITOR=true tnote 2>&1; echo "exit=$?"')

@@ -18,14 +18,23 @@ pub enum Selection {
     NewName(String),
 }
 
-pub fn run(note_names: &[String]) -> io::Result<Option<Selection>> {
+/// `title`/`header` are the popup border title and the instructions line above the
+/// list. `allow_new` controls whether a "New name..." row is offered at the top of
+/// the list (naming can create a new binding; goto can only jump to an existing one).
+pub struct PickerOptions<'a> {
+    pub title: &'a str,
+    pub header: &'a str,
+    pub allow_new: bool,
+}
+
+pub fn run(note_names: &[String], options: &PickerOptions) -> io::Result<Option<Selection>> {
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     execute!(stdout, EnterAlternateScreen)?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    let result = run_picker_loop(&mut terminal, note_names);
+    let result = run_picker_loop(&mut terminal, note_names, options);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -34,15 +43,24 @@ pub fn run(note_names: &[String]) -> io::Result<Option<Selection>> {
     result
 }
 
+/// Highest selectable list index: the filtered notes, plus one more for the
+/// "New name..." row when `allow_new` is set. Saturates to 0 when the list is empty.
+fn max_selectable_index(filtered_count: usize, allow_new: bool) -> usize {
+    let extra = if allow_new { 1 } else { 0 };
+    (filtered_count + extra).saturating_sub(1)
+}
+
 fn run_picker_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     note_names: &[String],
+    options: &PickerOptions,
 ) -> io::Result<Option<Selection>> {
     let mut state = PickerState::default();
 
     loop {
         let filtered = filtered_names(note_names, &state.filter);
-        state.clamp_selection(filtered.len());
+        let max_index = max_selectable_index(filtered.len(), options.allow_new);
+        state.clamp_selection(max_index);
 
         terminal.draw(|frame| {
             let area = frame.area();
@@ -58,13 +76,17 @@ fn run_picker_loop(
                 ])
                 .split(area);
 
-            let header = Paragraph::new(
-                "Select an existing named note, or choose New name... to enter one in tmux.",
-            )
-            .block(Block::default().borders(Borders::ALL).title(" tnote name "));
+            let header = Paragraph::new(options.header).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!(" {} ", options.title)),
+            );
             frame.render_widget(header, chunks[0]);
 
-            let mut items = vec![ListItem::new(Line::from(new_name_label(&state.filter)))];
+            let mut items = Vec::new();
+            if options.allow_new {
+                items.push(ListItem::new(Line::from(new_name_label(&state.filter))));
+            }
             items.extend(
                 filtered
                     .iter()
@@ -102,13 +124,18 @@ fn run_picker_loop(
                     state.selected = state.selected.saturating_sub(1);
                 }
                 KeyCode::Down => {
-                    state.selected = (state.selected + 1).min(filtered.len());
+                    state.selected = (state.selected + 1).min(max_index);
                 }
                 KeyCode::Enter => {
-                    if state.selected == 0 {
+                    if options.allow_new && state.selected == 0 {
                         return Ok(Some(Selection::NewName(state.filter.clone())));
                     }
-                    if let Some(name) = filtered.get(state.selected - 1) {
+                    let idx = if options.allow_new {
+                        state.selected - 1
+                    } else {
+                        state.selected
+                    };
+                    if let Some(name) = filtered.get(idx) {
                         return Ok(Some(Selection::Existing(name.clone())));
                     }
                 }
@@ -204,5 +231,17 @@ mod tests {
         assert_eq!(state.selected, 1);
         state.clamp_selection(0);
         assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn max_selectable_index_with_new_row_includes_the_extra_slot() {
+        assert_eq!(max_selectable_index(2, true), 2);
+        assert_eq!(max_selectable_index(0, true), 0);
+    }
+
+    #[test]
+    fn max_selectable_index_without_new_row_indexes_filtered_directly() {
+        assert_eq!(max_selectable_index(2, false), 1);
+        assert_eq!(max_selectable_index(0, false), 0);
     }
 }

@@ -255,13 +255,9 @@ fn executable_path() -> String {
         .unwrap_or_else(|| "tnote".to_string())
 }
 
-fn name_picker_attach_cmd(window_key: &str) -> String {
-    let binary = executable_path();
-    format!(
-        "/bin/sh -lc {cmd}",
-        cmd = shell_escape(&format!(
-            "export TNOTE_WINDOW_KEY={key}; \
-             python3 - <<'PY'\n\
+/// Shell snippet that drains any buffered stdin for ~150ms before exec'ing into a
+/// picker, so stray keypresses typed before the popup opens don't leak into it.
+const DRAIN_STDIN_PRELUDE: &str = "python3 - <<'PY'\n\
 import os, selectors, sys, time\n\
 sel = selectors.DefaultSelector()\n\
 sel.register(sys.stdin, selectors.EVENT_READ)\n\
@@ -274,9 +270,28 @@ while time.time() < deadline:\n\
         os.read(sys.stdin.fileno(), 4096)\n\
     except OSError:\n\
         break\n\
-PY\n\
-             exec {bin} __name-picker",
+PY\n";
+
+fn name_picker_attach_cmd(window_key: &str) -> String {
+    let binary = executable_path();
+    format!(
+        "/bin/sh -lc {cmd}",
+        cmd = shell_escape(&format!(
+            "export TNOTE_WINDOW_KEY={key}; {prelude}exec {bin} __name-picker",
             key = shell_escape(window_key),
+            prelude = DRAIN_STDIN_PRELUDE,
+            bin = shell_escape(&binary),
+        )),
+    )
+}
+
+fn goto_picker_attach_cmd() -> String {
+    let binary = executable_path();
+    format!(
+        "/bin/sh -lc {cmd}",
+        cmd = shell_escape(&format!(
+            "{prelude}exec {bin} __goto-picker",
+            prelude = DRAIN_STDIN_PRELUDE,
             bin = shell_escape(&binary),
         )),
     )
@@ -313,6 +328,31 @@ pub fn prompt_name(config: &crate::config::Config, window_key: &str) {
             "rounded",
             "-T",
             " tnote name ",
+            "-E",
+            &attach_cmd,
+        ])
+        .status();
+}
+
+/// Show tnote's goto picker in a popup session using configured dimensions.
+pub fn prompt_goto(config: &crate::config::Config) {
+    let attach_cmd = goto_picker_attach_cmd();
+
+    let _ = Command::new("tmux")
+        .args([
+            "display-popup",
+            "-x",
+            "R",
+            "-y",
+            "T",
+            "-w",
+            &config.width,
+            "-h",
+            &config.height,
+            "-b",
+            "rounded",
+            "-T",
+            " tnote goto ",
             "-E",
             &attach_cmd,
         ])
@@ -498,6 +538,14 @@ mod tests {
         assert!(cmd.contains("/bin/sh -lc"));
         assert!(cmd.contains("TNOTE_WINDOW_KEY"));
         assert!(cmd.contains("__name-picker"));
+    }
+
+    #[test]
+    fn goto_picker_attach_cmd_execs_hidden_subcommand() {
+        let cmd = goto_picker_attach_cmd();
+        assert!(cmd.contains("/bin/sh -lc"));
+        assert!(cmd.contains("__goto-picker"));
+        assert!(!cmd.contains("TNOTE_WINDOW_KEY"));
     }
 
     #[test]

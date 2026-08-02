@@ -218,6 +218,7 @@ pub fn run(config: &Config) {
         let tnote_help_cmd = tmux_run_shell(&format!("{} help", shell_escape(&tnote_bin)));
         let tnote_name_cmd = tmux_run_shell(&format!("{} name", shell_escape(&tnote_bin)));
         let tnote_ls_cmd = tmux_run_shell(&format!("{} ls", shell_escape(&tnote_bin)));
+        let tnote_goto_cmd = tmux_run_shell(&format!("{} goto", shell_escape(&tnote_bin)));
         let tmux_conf = format!(
             "# tnote key bindings — managed by 'tnote setup' / 'tnote uninstall'\n\
              unbind-key {key}\n\
@@ -229,7 +230,8 @@ pub fn run(config: &Config) {
              set -s command-alias[104] \"tnote-clean={tnote_clean_cmd}\"\n\
              set -s command-alias[105] \"tnote-help={tnote_help_cmd}\"\n\
              set -s command-alias[106] \"tnote-name={tnote_name_cmd}\"\n\
-             set -s command-alias[107] \"tnote-ls={tnote_ls_cmd}\"\n",
+             set -s command-alias[107] \"tnote-ls={tnote_ls_cmd}\"\n\
+             set -s command-alias[108] \"tnote-goto={tnote_goto_cmd}\"\n",
             key = key,
             tnote_cmd = tnote_cmd,
             tnote_show_cmd = tnote_show_cmd,
@@ -239,6 +241,7 @@ pub fn run(config: &Config) {
             tnote_help_cmd = tnote_help_cmd,
             tnote_name_cmd = tnote_name_cmd,
             tnote_ls_cmd = tnote_ls_cmd,
+            tnote_goto_cmd = tnote_goto_cmd,
         );
 
         if let Err(e) = fs::write(&tmux_conf_path, &tmux_conf) {

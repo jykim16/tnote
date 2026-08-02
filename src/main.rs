@@ -129,9 +129,9 @@ enum Cmd {
     },
     /// Jump the current terminal to the tmux window bound to a named note
     Goto {
-        /// Named note to jump to
+        /// Named note to jump to; omit inside tmux to pick interactively
         #[arg(short = 'n', long)]
-        name: String,
+        name: Option<String>,
     },
     /// Remove notes not tied to a running process or window
     Clean {
@@ -194,6 +194,9 @@ enum Cmd {
     /// Internal: interactive tmux popup picker for note naming
     #[command(name = "__name-picker", hide = true)]
     NamePicker { window_key: Option<String> },
+    /// Internal: interactive tmux popup picker for goto
+    #[command(name = "__goto-picker", hide = true)]
+    GotoPicker,
     /// Internal: name a specific tmux target from tmux command-prompt
     #[command(name = "__name-target", hide = true)]
     NameTarget { window_key: String, name: String },
@@ -245,7 +248,7 @@ fn main() {
             template.as_deref(),
         ),
         Some(Cmd::Show { name, json }) => cmd_show(&config, &notes, name.as_deref(), *json),
-        Some(Cmd::Goto { name }) => cmd_goto(&notes, name),
+        Some(Cmd::Goto { name }) => cmd_goto_entry(&config, &notes, name.as_deref()),
         Some(Cmd::Clean {
             all,
             name,
@@ -284,6 +287,7 @@ fn main() {
             cmd_name_picker(&notes, key.as_deref());
         }
         Some(Cmd::NameTarget { window_key, name }) => cmd_name_target(&notes, window_key, name),
+        Some(Cmd::GotoPicker) => cmd_goto_picker(&notes),
         Some(Cmd::Popup { window_key }) => {
             let key = window_key
                 .as_deref()
@@ -591,7 +595,13 @@ fn cmd_name_picker(notes: &Notes, window_key: Option<&str>) {
         std::process::exit(1);
     };
 
-    match name_picker::run(&note_names) {
+    let options = name_picker::PickerOptions {
+        title: "tnote name",
+        header: "Select an existing named note, or choose New name... to enter one in tmux.",
+        allow_new: true,
+    };
+
+    match name_picker::run(&note_names, &options) {
         Ok(Some(name_picker::Selection::Existing(name))) => {
             cmd_name_target(notes, window_key, &name);
         }
@@ -624,6 +634,54 @@ fn cmd_name_target(notes: &Notes, window_key: &str, name: &str) {
         }
         Err(e) => {
             eprintln!("tnote name: error naming note: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_goto_entry(config: &Config, notes: &Notes, name: Option<&str>) {
+    let Some(name) = name else {
+        if tmux::is_in_tmux() {
+            tmux::prompt_goto(config);
+        } else {
+            eprintln!("tnote goto: provide a name, e.g.: tnote goto -n <name>");
+            std::process::exit(1);
+        }
+        return;
+    };
+
+    cmd_goto(notes, name);
+}
+
+/// Named notes with at least one live tmux-bound key — the only valid goto targets.
+/// (Ambiguity between multiple live windows for the same name is still resolved,
+/// with its own error, by `cmd_goto` after a name is picked.)
+fn goto_target_names(notes: &Notes) -> Vec<String> {
+    let live_windows = tmux::live_window_keys();
+    notes
+        .link_sources()
+        .into_iter()
+        .filter(|(_, keys)| keys.iter().any(|k| live_windows.contains(k)))
+        .map(|(name, _)| name)
+        .collect()
+}
+
+fn cmd_goto_picker(notes: &Notes) {
+    let note_names = goto_target_names(notes);
+    let options = name_picker::PickerOptions {
+        title: "tnote goto",
+        header: "Select a named note to jump to its bound tmux window.",
+        allow_new: false,
+    };
+
+    match name_picker::run(&note_names, &options) {
+        Ok(Some(name_picker::Selection::Existing(name)))
+        | Ok(Some(name_picker::Selection::NewName(name))) => {
+            cmd_goto(notes, &name);
+        }
+        Ok(None) => (),
+        Err(e) => {
+            eprintln!("tnote goto: {}", e);
             std::process::exit(1);
         }
     }
@@ -1662,6 +1720,7 @@ USAGE:
   tnote --force --template NAME    Overwrite existing content when applying a template (short: -f, -ft NAME)
   tnote show                       Print note contents inline
   tnote goto --name <name>         Jump the current terminal to a named note's bound tmux window
+  tnote goto                       Inside tmux with no --name, pick a goto target interactively
   tnote clean [--dryrun]           Remove orphaned notes and popup sessions
   tnote list / ls                  List all notes with line counts
   tnote path                       Print the note file path
@@ -1676,6 +1735,7 @@ TMUX COMMAND LINE (works while a process is running):
   Press ':' in any tmux window, then type:
     tnote              Open note popup
     tnote-name         Name menu with existing notes plus a new-name prompt
+    tnote-goto         Goto menu — pick a named note and jump to its tmux window
     tnote-show         Print note contents
     tnote-clean        Remove orphaned notes
     tnote-list         List all notes
