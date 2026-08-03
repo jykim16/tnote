@@ -1,6 +1,6 @@
 [package]
 name = "tnote"
-version = "0.3.8"
+version = "0.4.0"
 edition = "2021"
 description = "Terminal Notepad"
 repository = "https://github.com/jykim16/tnote"
