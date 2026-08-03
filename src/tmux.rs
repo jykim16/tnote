@@ -12,12 +12,25 @@ pub fn is_in_tmux() -> bool {
     std::env::var("TMUX").is_ok()
 }
 
+/// The pane a `tnote` process is actually running in, per tmux's own `TMUX_PANE`
+/// env var. Without an explicit `-t` target, commands like `display-message` and
+/// `rename-window` resolve "current" relative to the attached *client*, not the
+/// pane that invoked the command — so a process running in a background/unfocused
+/// window silently operates on whichever window the client happens to be looking
+/// at instead. Always pass this as `-t` to such commands.
+fn current_pane_target() -> Option<String> {
+    std::env::var("TMUX_PANE").ok()
+}
+
 /// True when running inside a tnote popup session.
 pub fn is_popup_session() -> bool {
-    let Ok(output) = Command::new("tmux")
-        .args(["display-message", "-p", "#{session_name}"])
-        .output()
-    else {
+    let mut cmd = Command::new("tmux");
+    cmd.args(["display-message", "-p"]);
+    if let Some(pane) = current_pane_target() {
+        cmd.args(["-t", &pane]);
+    }
+    cmd.arg("#{session_name}");
+    let Ok(output) = cmd.output() else {
         return false;
     };
     String::from_utf8_lossy(&output.stdout)
@@ -28,10 +41,13 @@ pub fn is_popup_session() -> bool {
 /// Returns the current tmux window's note key, e.g. "tmux-$1+@3".
 /// Uses stable session/window IDs so renames don't break the key.
 pub fn window_key() -> Option<String> {
-    let output = Command::new("tmux")
-        .args(["display-message", "-p", "#{session_id}+#{window_id}"])
-        .output()
-        .ok()?;
+    let mut cmd = Command::new("tmux");
+    cmd.args(["display-message", "-p"]);
+    if let Some(pane) = current_pane_target() {
+        cmd.args(["-t", &pane]);
+    }
+    cmd.arg("#{session_id}+#{window_id}");
+    let output = cmd.output().ok()?;
     let key = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if key.is_empty() {
         None
@@ -240,12 +256,24 @@ pub fn cleanup_popup_sessions(note_dir: &std::path::Path, dry_run: bool) -> Vec<
 
 /// Rename the current tmux window.
 pub fn rename_window(name: &str) {
-    let _ = Command::new("tmux").args(["rename-window", name]).output();
+    let mut cmd = Command::new("tmux");
+    cmd.arg("rename-window");
+    if let Some(pane) = current_pane_target() {
+        cmd.args(["-t", &pane]);
+    }
+    cmd.arg(name);
+    let _ = cmd.output();
 }
 
 /// Show a message in the tmux status bar.
 pub fn display_message(msg: &str) {
-    let _ = Command::new("tmux").args(["display-message", msg]).status();
+    let mut cmd = Command::new("tmux");
+    cmd.arg("display-message");
+    if let Some(pane) = current_pane_target() {
+        cmd.args(["-t", &pane]);
+    }
+    cmd.arg(msg);
+    let _ = cmd.status();
 }
 
 fn executable_path() -> String {
