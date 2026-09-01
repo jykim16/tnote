@@ -2,6 +2,14 @@
 
 Terminal Notepad. Each tmux window or shell session gets its own persistent markdown note. In tmux, notes open in a floating popup anchored to the top-right corner. Press the same key to close it.
 
+## See it in action
+
+### Manage a task with agents
+
+Start a tnote manager, delegate work to a tnote agent, and follow the shared note as the task moves from assignment to completion.
+
+![Starting a tnote manager and agent and resolving their task](docs/assets/manager-agent-workflow.gif)
+
 ## Why tnote?
 
 Running more than a dozen Claude Code sessions in parallel made it easy to get a lot done, but constant context switching became a real problem. Returning to a session meant trying to remember what the next job was before getting back into flow.
@@ -10,17 +18,9 @@ tnote was built to solve that. It's lightweight and stays out of the way: a quic
 
 Since tnotes are just markdown files, my agents use tnote too. I tell it to log its progress in tnote or complete all the tasks I've listed in my tnote. It's as simple as that!
 
-```
-┌─────────────────────────────────────────────────┐
-│  work: api-server                               │
-│                  ╭ tmux tnote - work+0 ────────╮│
-│  $ cargo run     │ ## TODO                     ││
-│  Compiling...    │ - add auth header           ││
-│                  │ - check rate limit          ││
-│                  │                             ││
-│                  ╰─────────────────────────────╯│
-└─────────────────────────────────────────────────┘
-```
+![Opening and closing a tnote beside the terminal](docs/assets/open-close-note.gif)
+
+<p align="center"><em>Open the note, add context, and get straight back to the terminal.</em></p>
 
 ## Requirements
 
