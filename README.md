@@ -2,14 +2,6 @@
 
 Terminal Notepad. Each tmux window or shell session gets its own persistent markdown note. In tmux, notes open in a floating popup anchored to the top-right corner. Press the same key to close it.
 
-## See it in action
-
-### Manage a task with agents
-
-Start a tnote manager, delegate work to a tnote agent, and follow the shared note as the task moves from assignment to completion.
-
-![Starting a tnote manager and agent and resolving their task](docs/assets/manager-agent-workflow.gif)
-
 ## Why tnote?
 
 Running more than a dozen Claude Code sessions in parallel made it easy to get a lot done, but constant context switching became a real problem. Returning to a session meant trying to remember what the next job was before getting back into flow.
@@ -150,3 +142,11 @@ archive_retention_days=30
 If `renderer` is unset or empty, `tnote show` uses the built-in plain output.
 
 If `archive_retention_days` is unset, archived notes are kept forever until manually removed. When set, every `tnote clean` (without `-n`) permanently deletes archived notes whose file hasn't been modified in more than that many days — unlike `--archive`, this is not reversible. Set it via `tnote setup --advanced`.
+
+## See it in action
+
+### Manage a task with agents
+
+Start a tnote manager, delegate work to a tnote agent, and follow the shared note as the task moves from assignment to completion.
+
+![Starting a tnote manager and agent and resolving their task](docs/assets/manager-agent-workflow.gif)
